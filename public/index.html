@@ -474,14 +474,20 @@
         ? '<div class="summary">gates: <strong>' + (ev.pass ? "pass" : "fail") + '</strong>' + (ev.summary ? " — " + esc(ev.summary) : "") + "</div>"
         : '<div class="summary">evaluation pending…</div>';
       var judgeHtml = "";
+      var whyData = null;
       try {
         var checksObj = typeof ev.checks === 'string' ? JSON.parse(ev.checks) : ev.checks;
         if (checksObj && checksObj.judge && checksObj.judge.summary) {
+          whyData = checksObj;
           judgeHtml = '<div class="judge" style="margin:10px 0;padding:10px 12px;border:1px solid var(--line-soft);border-radius:8px;background:var(--bg-soft)">' +
             '<div style="font-size:11px;font-weight:600;color:var(--dim);margin-bottom:6px">CLEF JUDGE (advisory — tests decide)</div>' +
-            '<div style="font-size:12px">' + esc(checksObj.judge.summary) + '</div></div>';
+            '<div style="font-size:12px">' + esc(checksObj.judge.summary) + '</div>' +
+            '<button class="btn small ghost" style="margin-top:8px;" onclick="showWhy(\'' + esc(intentId) + '\')">Ask Why →</button></div>' +
+            '<div id="why-' + esc(intentId) + '" style="display:none;margin:10px 0;padding:12px;border:1px solid var(--amber);border-radius:8px;background:rgba(229,161,60,0.05);"></div>';
         }
       } catch (e) {}
+      // Cost display (placeholder for AI Gateway integration)
+      var costHtml = '<div style="font-size:11px;color:var(--dim);margin:8px 0;">Cost: <span style="color:var(--mut);">n/a</span> <span style="font-size:10px;">(AI Gateway not connected)</span></div>';
 
       var dec = ui.decisions[intentId];
       var actionHtml;
@@ -509,7 +515,7 @@
         '</div>' +
         '<div class="intent-meta">by <span class="agent">' + esc(it.agent || "?") + '</span> · candidate <span class="mono">' + esc(cand.repo || "") + "@" + esc(short(cand.commit)) + "</span>" +
         ' <button class="btn small ghost" style="margin-left:8px;" onclick="openProvenanceFor(\'' + esc(intentId) + '\')">Provenance</button></div>' +
-        checksHtml + heldOut + verdictLine + judgeHtml + actionHtml +
+        checksHtml + heldOut + verdictLine + judgeHtml + costHtml + actionHtml +
       "</div>";
     }).join("");
   }
@@ -831,6 +837,56 @@
     }
   });
 
+  /* ---------- ask why (from stored evidence only) ---------- */
+  // Per spec: why-line must be generated ONLY from stored evidence,
+  // labeled as generated, and linked to evidence. No new LLM calls.
+  window.showWhy = function (intentId) {
+    var el = document.getElementById("why-" + intentId);
+    if (!el) return;
+    if (el.style.display !== "none") { el.style.display = "none"; return; }
+    // Find the card data from the current render
+    // We store the last cards data globally for this
+    var card = (window._lastCards || []).find(function (c) {
+      return c.intent && c.intent.id === intentId;
+    });
+    if (!card || !card.evaluation) {
+      el.innerHTML = '<div style="font-size:12px;color:var(--dim);">No evaluation data available.</div>';
+      el.style.display = "block";
+      return;
+    }
+    var ev = card.evaluation;
+    var checks = typeof ev.checks === 'string' ? JSON.parse(ev.checks) : ev.checks;
+    var judge = checks.judge || {};
+    var html = '<div style="font-size:11px;font-weight:600;color:var(--amber);margin-bottom:8px;">WHY THIS CANDIDATE — generated from stored evidence only</div>';
+    html += '<ul style="margin:0;padding-left:18px;font-size:12px;line-height:1.6;">';
+    // Tests
+    if (ev.pass) {
+      html += '<li><strong>All deterministic gates passed:</strong> ' + esc(ev.summary || "") + '</li>';
+    } else {
+      html += '<li><strong style="color:var(--red);">Gates failed:</strong> ' + esc(ev.summary || "") + '</li>';
+    }
+    // Judge scores
+    if (judge.quality && judge.quality.length) {
+      var q = judge.quality.sort(function (a, b) { return b.probability - a.probability; })[0];
+      html += '<li><strong>Code quality:</strong> ' + esc(q.option) + ' (' + Math.round(q.probability * 100) + '% confidence)</li>';
+    }
+    if (judge.edge_cases && judge.edge_cases.length) {
+      var e = judge.edge_cases.sort(function (a, b) { return b.probability - a.probability; })[0];
+      html += '<li><strong>Edge cases:</strong> ' + esc(e.option) + ' (' + Math.round(e.probability * 100) + '%)</li>';
+    }
+    if (judge.idiomatic && judge.idiomatic.length) {
+      var idi = judge.idiomatic.sort(function (a, b) { return b.probability - a.probability; })[0];
+      html += '<li><strong>Idiomatic:</strong> ' + esc(idi.option) + ' (' + Math.round(idi.probability * 100) + '%)</li>';
+    }
+    // Heat
+    var heat = card.intent.heat || 0;
+    html += '<li><strong>Path overlap heat:</strong> ' + heat + (heat >= 2 ? ' (high — review for collisions)' : heat === 1 ? ' (medium)' : ' (low)') + '</li>';
+    html += '</ul>';
+    html += '<div style="font-size:10px;color:var(--dim);margin-top:8px;font-style:italic;">This explanation is generated from stored test results, judge scores, and heat badges. No new AI inference was run.</div>';
+    el.innerHTML = html;
+    el.style.display = "block";
+  };
+
   function poll() {
     Promise.all([api("/api/intents"), api("/api/cards"), api("/api/ledger")]).then(function (rs) {
       var okAll = rs.every(function (r) { return r.ok; });
@@ -838,6 +894,7 @@
       if (!okAll) return;
       renderIntents(rs[0].data);
       renderMap(rs[0].data);
+      window._lastCards = rs[1].data; // Store for Ask Why
       renderCards(rs[1].data);
       renderLedger(rs[2].data);
       renderPromotions(rs[2].data);
