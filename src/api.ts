@@ -14,6 +14,28 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 	const path = url.pathname;
 	const method = req.method;
 
+	// V2 fix: require shared secret on all write endpoints.
+	// The UI prompts for it once and stores in sessionStorage.
+	const requireAuth = () => {
+		const secret = req.headers.get('x-verdict-secret');
+		if (!env.INTERNAL_SECRET || secret !== env.INTERNAL_SECRET) {
+			return json({ error: 'unauthorized: x-verdict-secret required' }, 401);
+		}
+		return null;
+	};
+	const isWrite = method === 'POST' && (
+		path === '/api/intents' ||
+		/\/api\/intents\/[^/]+\/fork$/.test(path) ||
+		/\/api\/intents\/[^/]+\/submit$/.test(path) ||
+		path === '/api/decide' ||
+		path === '/api/undo' ||
+		path === '/api/promotions/confirm'
+	);
+	if (isWrite) {
+		const authErr = requireAuth();
+		if (authErr) return authErr;
+	}
+
 	// --- Declare intent ---
 	if (method === 'POST' && path === '/api/intents') {
 		const body = (await req.json()) as { title: string; description?: string; paths: string[]; agent: string };
@@ -201,6 +223,24 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 		if (!evaluation || !evaluation.pass) {
 			return json({ error: 'candidate has not passed evaluation gates' }, 409);
 		}
+		// V5/V14 fix: the evaluated commit must match the candidate's current commit.
+		// If the agent pushed after evaluation, the tests didn't cover what's being promoted.
+		const evaluatedCommit = evaluation.commit_sha;
+		if (!evaluatedCommit || evaluatedCommit !== candidate.commit_sha) {
+			return json({
+				error: 'evaluation is stale: candidate was updated after evaluation',
+				guidance: 'Resubmit the candidate to trigger a fresh evaluation of the current commit.',
+				evaluated_commit: evaluatedCommit,
+				current_commit: candidate.commit_sha,
+			}, 409);
+		}
+		// V15 fix: reject if intent already has a decision (idempotency)
+		const existingDecision: any = await env.DB.prepare(
+			`SELECT id FROM decisions WHERE intent_id = ? LIMIT 1`
+		).bind(intent.id).first();
+		if (existingDecision) {
+			return json({ error: 'intent already has a decision', decision_id: existingDecision.id }, 409);
+		}
 		let baseRepo: any = null;
 		let forkRepo: any = null;
 		try {
@@ -212,6 +252,16 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 			const mainHead: string = mainLog[0].hash;
 			const forkHead: string = forkLog[0].hash;
 			if (forkHead === mainHead) return json({ eligible: false, reason: 'nothing to promote' }, 409);
+			// V5/V14 fix: fork head must equal the evaluated commit, not just contain main
+			if (forkHead !== evaluatedCommit) {
+				return json({
+					eligible: false,
+					reason: 'fork head does not match evaluated commit',
+					guidance: 'The fork was updated after evaluation. Resubmit to re-evaluate the current head.',
+					fork_head: forkHead,
+					evaluated_commit: evaluatedCommit,
+				}, 409);
+			}
 			if (!forkLog.some((c: any) => c.hash === mainHead)) {
 				return json(
 					{

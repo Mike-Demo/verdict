@@ -358,8 +358,23 @@
     return isNaN(d.getTime()) ? String(t) : d.toLocaleString();
   }
   function api(path, opts) {
+    opts = opts || {};
+    // V2: attach shared secret on write requests (stored in sessionStorage after first prompt)
+    if (opts.method === 'POST') {
+      opts.headers = opts.headers || {};
+      var secret = sessionStorage.getItem('verdict_secret');
+      if (!secret) {
+        secret = prompt('Verdict write secret (ask Demo):');
+        if (secret) sessionStorage.setItem('verdict_secret', secret);
+      }
+      if (secret) opts.headers['x-verdict-secret'] = secret;
+    }
     return fetch(path, opts).then(function (res) {
       return res.json().catch(function () { return {}; }).then(function (data) {
+        if (res.status === 401) {
+          sessionStorage.removeItem('verdict_secret');
+          alert('Unauthorized: wrong or missing write secret.');
+        }
         return { ok: res.ok, status: res.status, data: data };
       });
     });
