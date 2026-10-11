@@ -20,6 +20,9 @@ export async function handleApi(req: Request, env: Env, url: URL): Promise<Respo
 			return json({ error: 'title, paths[], agent required' }, 400);
 		}
 		const active = await activeIntents(env);
+		if (active.length >= 5) {
+			return json({ error: 'intent queue is full (5). Resolve or withdraw an intent first.' }, 409);
+		}
 		const id = uid('intent');
 		await env.DB.prepare(
 			`INSERT INTO intents (id, title, description, paths, agent, status, created_at) VALUES (?, ?, ?, ?, ?, 'declared', ?)`,
@@ -27,9 +30,6 @@ export async function handleApi(req: Request, env: Env, url: URL): Promise<Respo
 			.bind(id, body.title, body.description ?? '', JSON.stringify(body.paths), body.agent, now())
 			.run();
 		const heat = heatFor(body.paths, active.map((a: any) => ({ paths: parsePaths(a.paths) })));
-		if (active.length >= 5) {
-			return json({ error: 'intent queue is full (5). Resolve or withdraw an intent first.' }, 409);
-		}
 		await ledger(env, 'intent.declared', id, { title: body.title, agent: body.agent, paths: body.paths, heat });
 		return json({ id, title: body.title, agent: body.agent, paths: body.paths, heat, status: 'declared' });
 	}

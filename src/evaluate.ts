@@ -17,12 +17,8 @@ async function dispose(_h: any) {
 
 export async function runEvaluation(env: Env, params: EvalParams) {
 	const { candidate_id, repo, commit } = params;
-	const steps: string[] = [];
-	const mark = (s: string) => steps.push(`${Date.now()}: ${s}`);
 
-	try {
 	// Gate 1: static checks via the Artifacts binding (fast, deterministic).
-	mark('artifacts.get#1');
 	const r: any = await env.ARTIFACTS.get(repo);
 	let staticChecks: any;
 	try {
