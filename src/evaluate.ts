@@ -89,6 +89,63 @@ export async function runEvaluation(env: Env, params: EvalParams) {
 	}
 	// NOTE: no sandbox.destroy() — it can crash the isolate uncatchably.
 
+	// Scope-creep detection: diff the candidate commit against current base
+	// main and compare the changed files to the intent's declared paths.
+	// Files outside the declared scope are flagged (they cannot silently
+	// widen the blast radius of a promotion).
+	let changedFiles: string[] = [];
+	let scopeChecked = false;
+	try {
+		const baseHandle: any = await env.ARTIFACTS.get(env.BASE_REPO);
+		let baseReadToken = '';
+		try {
+			baseReadToken = (await baseHandle.createToken('read', 3600)).plaintext;
+		} finally {
+			await dispose(baseHandle);
+		}
+		const baseSecret = baseReadToken.split('?expires=')[0];
+		const baseAuthRemote = `https://${env.ACCOUNT_HOST}/git/${env.NAMESPACE}/${env.BASE_REPO}.git`.replace(
+			'https://',
+			`https://x:${baseSecret}@`,
+		);
+		if (out.clone?.ok) {
+			const diffOut = await sandbox.exec(
+				`cd /workspace/cand && git remote add verdict-base ${baseAuthRemote} 2>/dev/null; git fetch verdict-base main --depth=50 2>&1 | tail -1 && git diff --name-only verdict-base/main HEAD 2>/dev/null`,
+			);
+			if (diffOut.exitCode === 0) {
+				changedFiles = diffOut.stdout
+					.split('\n')
+					.map((s: string) => s.trim())
+					.filter((s: string) => s && !s.startsWith('fatal'));
+				scopeChecked = true;
+			}
+		}
+	} catch (e: any) {
+		console.error('[scope] diff failed:', String(e?.message ?? e).slice(0, 200));
+	}
+	const intentRow: any = await env.DB.prepare(
+		`SELECT paths, spec_commit FROM intents WHERE id = (SELECT intent_id FROM candidates WHERE id = ?)`,
+	)
+		.bind(candidate_id)
+		.first();
+	let declaredPaths: string[] = [];
+	try {
+		declaredPaths = JSON.parse(intentRow?.paths ?? '[]');
+	} catch {}
+	const normPath = (p: string) => p.replace(/\/+$/, '');
+	const inDeclaredScope = (f: string) =>
+		declaredPaths.map(normPath).some((d) => {
+			const nf = normPath(f);
+			return nf === d || nf.startsWith(d + '/');
+		});
+	const undeclaredFiles = changedFiles.filter((f) => !inDeclaredScope(f));
+	const scopeCreep = scopeChecked ? undeclaredFiles.length > 0 : null;
+	// Candidate must never edit its own judge: flag diffs that touch test/spec paths.
+	const touchedTests = changedFiles.some(
+		(f) => f.startsWith('test/') || f.endsWith('.test.js') || f.includes('heldout'),
+	);
+	const specCommit = intentRow?.spec_commit ?? null;
+
 	const checks = {
 		commitFound: !!staticChecks.commitFound,
 		hasPackageJson: !!staticChecks.hasPackageJson,
@@ -97,6 +154,12 @@ export async function runEvaluation(env: Env, params: EvalParams) {
 		visibleTestsPass: !!out.visible?.ok,
 		heldOutTestsPass: out.heldOut ? !!out.heldOut.ok : null,
 		testOutput: out,
+		changed_files: changedFiles,
+		scope_checked: scopeChecked,
+		scope_creep: scopeCreep,
+		undeclared_files: undeclaredFiles,
+		touched_tests: touchedTests,
+		spec_commit: specCommit,
 	};
 	const pass =
 		checks.commitFound && checks.hasPackageJson && checks.installOk && checks.visibleTestsPass && checks.heldOutTestsPass === true;
@@ -140,6 +203,14 @@ export async function runEvaluation(env: Env, params: EvalParams) {
 		(checks as any).judge = judgeResult;
 	}
 
+	// Cost attribution: the Clef judge call is the measurable AI cost.
+	// clef-flash lists ~$0.038/1M tokens; a judge call is a few thousand
+	// tokens, so we record a flat $0.002 estimate, clearly labeled as
+	// estimated until AI Gateway metering is wired in.
+	const costUsd = judgeResult ? 0.002 : 0;
+	const costEstimated = 1;
+	(checks as any).cost = { usd: costUsd, estimated: true, source: judgeResult ? 'clef-flash' : 'none' };
+
 	const summary = [
 		`commit ${commit.slice(0, 8)} found`,
 		`install ${checks.installOk ? 'ok' : 'FAILED'}`,
@@ -148,7 +219,7 @@ export async function runEvaluation(env: Env, params: EvalParams) {
 	].join(' · ');
 
 	await env.DB.prepare(
-		`INSERT INTO evaluations (id, candidate_id, checks, pass, held_out_pass, summary, evaluated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO evaluations (id, candidate_id, checks, pass, held_out_pass, summary, cost_usd, cost_estimated, evaluated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	)
 		.bind(
 			uid('eval'),
@@ -157,13 +228,24 @@ export async function runEvaluation(env: Env, params: EvalParams) {
 			pass ? 1 : 0,
 			checks.heldOutTestsPass == null ? null : checks.heldOutTestsPass ? 1 : 0,
 			summary,
+			costUsd,
+			costEstimated,
 			now(),
 		)
 		.run();
 	await env.DB.prepare(`UPDATE intents SET status = 'evaluated' WHERE id = (SELECT intent_id FROM candidates WHERE id = ?)`)
 		.bind(candidate_id)
 		.run();
-	await ledger(env, 'evaluation.done', candidate_id, { pass, summary });
+	await ledger(env, 'evaluation.done', candidate_id, {
+		pass,
+		summary,
+		scope_creep: scopeCreep,
+		undeclared_files: undeclaredFiles,
+		touched_tests: touchedTests,
+		spec_commit: specCommit,
+		cost_usd: costUsd,
+		cost_estimated: !!costEstimated,
+	});
 
 	return { pass, summary, checks };
 }

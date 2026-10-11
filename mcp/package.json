@@ -1,0 +1,1 @@
+{"bin":{"verdict-mcp":"./server.js"},"description":"Minimal MCP server (stdio) for the Verdict intent-led decision forge. Zero dependencies.","name":"verdict-mcp","private":true,"version":"0.1.0"}

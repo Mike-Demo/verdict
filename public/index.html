@@ -200,6 +200,7 @@
     display: flex; gap: 12px; align-items: flex-start;
   }
   .notice.info { border-color: #27405c; background: #131a24; color: #a9c8e8; }
+  .notice.warn { border-color: #5c4a27; background: #241d13; color: #e8c88a; }
   .notice button.dismiss {
     margin-left: auto; background: none; border: none; color: inherit; cursor: pointer;
     font-size: 16px; line-height: 1; padding: 0 0 0 8px; flex: none;
@@ -473,6 +474,23 @@
       var verdictLine = ev
         ? '<div class="summary">gates: <strong>' + (ev.pass ? "pass" : "fail") + '</strong>' + (ev.summary ? " — " + esc(ev.summary) : "") + "</div>"
         : '<div class="summary">evaluation pending…</div>';
+      // Scope-creep warning: candidate touched files outside its declared intent paths.
+      var scopeWarn = "";
+      try {
+        var ckScope = typeof ev.checks === 'string' ? JSON.parse(ev.checks) : ev.checks;
+        if (ckScope && ckScope.scope_creep === true) {
+          scopeWarn = '<div class="notice warn" style="margin:10px 0 0"><span>⚠ <strong>scope expanded</strong> — files outside declared intent paths: <span class="mono">' +
+            esc((ckScope.undeclared_files || []).join(", ")) + '</span></span></div>';
+        }
+      } catch (e2) {}
+      // Test-path flag: candidate touched test/spec files — it may be editing its own judge.
+      var testWarn = "";
+      try {
+        var ckTest = typeof ev.checks === 'string' ? JSON.parse(ev.checks) : ev.checks;
+        if (ckTest && ckTest.touched_tests === true) {
+          testWarn = '<div class="notice warn" style="margin:10px 0 0"><span>⚠ <strong>test paths touched</strong> — this candidate modified test/spec files. Held-out tests run from the pinned spec, but review the diff.</span></div>';
+        }
+      } catch (e3) {}
       var judgeHtml = "";
       var whyData = null;
       try {
@@ -486,8 +504,16 @@
             '<div id="why-' + esc(intentId) + '" style="display:none;margin:10px 0;padding:12px;border:1px solid var(--amber);border-radius:8px;background:rgba(229,161,60,0.05);"></div>';
         }
       } catch (e) {}
-      // Cost display (placeholder for AI Gateway integration)
-      var costHtml = '<div style="font-size:11px;color:var(--dim);margin:8px 0;">Cost: <span style="color:var(--mut);">n/a</span> <span style="font-size:10px;">(AI Gateway not connected)</span></div>';
+      // Cost display: real when metered, clearly labeled when estimated.
+      var costHtml = "";
+      if (ev && ev.cost_usd != null) {
+        costHtml = '<div style="font-size:11px;color:var(--dim);margin:8px 0;">Cost: <span style="color:var(--mut);">$' + Number(ev.cost_usd).toFixed(4) + '</span>' +
+          (ev.cost_estimated
+            ? ' <span style="font-size:10px;">(estimated — AI Gateway not connected)</span>'
+            : ' <span style="font-size:10px;">(metered)</span>') + '</div>';
+      } else {
+        costHtml = '<div style="font-size:11px;color:var(--dim);margin:8px 0;">Cost: <span style="color:var(--mut);">n/a</span></div>';
+      }
 
       var dec = ui.decisions[intentId];
       var actionHtml;
@@ -515,7 +541,7 @@
         '</div>' +
         '<div class="intent-meta">by <span class="agent">' + esc(it.agent || "?") + '</span> · candidate <span class="mono">' + esc(cand.repo || "") + "@" + esc(short(cand.commit)) + "</span>" +
         ' <button class="btn small ghost" style="margin-left:8px;" onclick="openProvenanceFor(\'' + esc(intentId) + '\')">Provenance</button></div>' +
-        checksHtml + heldOut + verdictLine + judgeHtml + costHtml + actionHtml +
+        checksHtml + heldOut + verdictLine + scopeWarn + testWarn + judgeHtml + costHtml + actionHtml +
       "</div>";
     }).join("");
   }
@@ -818,7 +844,17 @@
         html += '<div style="margin-top:12px;padding:12px;background:var(--bg0);border-radius:8px;border:1px solid var(--line);">' +
           '<div style="font-size:11px;color:var(--dim);margin-bottom:6px;">EVIDENCE</div>' +
           '<div style="font-size:13px;">Result: <strong style="color:' + (p.pass ? "var(--green)" : "var(--red)") + ';">' + (p.pass ? "PASS" : "FAIL") + '</strong></div>' +
-          '<div style="font-size:12px;color:var(--mut);margin-top:4px;">' + esc(p.summary || "") + '</div></div>';
+          '<div style="font-size:12px;color:var(--mut);margin-top:4px;">' + esc(p.summary || "") + '</div>';
+        if (p.spec_commit) {
+          html += '<div style="font-size:11px;color:var(--mut);margin-top:6px;">Spec pinned at: <span class="mono">' + esc(String(p.spec_commit).slice(0, 12)) + '</span></div>';
+        }
+        if (p.scope_creep === true) {
+          html += '<div style="font-size:11px;color:var(--amber);margin-top:4px;">⚠ Scope expanded: <span class="mono">' + esc((p.undeclared_files || []).join(", ")) + '</span></div>';
+        }
+        if (p.touched_tests === true) {
+          html += '<div style="font-size:11px;color:var(--amber);margin-top:4px;">⚠ Candidate touched test/spec paths</div>';
+        }
+        html += '</div>';
       }
       if (entry.kind === "decision.made" && p.rationale) {
         html += '<div style="margin-top:12px;padding:12px;background:var(--bg0);border-radius:8px;border:1px solid var(--line);">' +
@@ -881,8 +917,39 @@
     // Heat
     var heat = card.intent.heat || 0;
     html += '<li><strong>Path overlap heat:</strong> ' + heat + (heat >= 2 ? ' (high — review for collisions)' : heat === 1 ? ' (medium)' : ' (low)') + '</li>';
+    // Cost
+    if (ev.cost_usd != null) {
+      html += '<li><strong>Eval cost:</strong> $' + Number(ev.cost_usd).toFixed(4) + (ev.cost_estimated ? ' (estimated)' : ' (metered)') + '</li>';
+    }
+    // Scope enforcement
+    if (checks.scope_checked) {
+      var changed = checks.changed_files || [];
+      html += '<li><strong>Changed files (' + changed.length + '):</strong> <span class="mono">' + esc(changed.join(", ") || "none") + '</span></li>';
+      if (checks.scope_creep === true) {
+        html += '<li><strong style="color:var(--amber);">⚠ Scope expanded:</strong> touched files outside declared intent paths: <span class="mono">' + esc((checks.undeclared_files || []).join(", ")) + '</span></li>';
+      } else {
+        html += '<li><strong>Scope:</strong> all changed files within declared intent paths ✓</li>';
+      }
+    }
+    // Spec pinning + test-path integrity
+    if (checks.spec_commit) {
+      html += '<li><strong>Spec pinned at:</strong> <span class="mono">' + esc(String(checks.spec_commit).slice(0, 8)) + '</span> (fork base — candidate cannot move its own goalposts)</li>';
+    }
+    if (checks.touched_tests === true) {
+      html += '<li><strong style="color:var(--amber);">⚠ Test paths touched:</strong> candidate modified test/spec files; held-out tests ran from the pinned spec.</li>';
+    }
     html += '</ul>';
     html += '<div style="font-size:10px;color:var(--dim);margin-top:8px;font-style:italic;">This explanation is generated from stored test results, judge scores, and heat badges. No new AI inference was run.</div>';
+    // Evidence drill-down: jump into the Provenance Drawer at this evaluation's ledger entry.
+    try {
+      var candId3 = card.candidate && card.candidate.id;
+      var evEntry = (typeof scrubberData !== "undefined" ? scrubberData : []).find(function (e) {
+        return e.kind === "evaluation.done" && e.ref_id === candId3;
+      });
+      if (evEntry) {
+        html += '<div style="margin-top:10px;"><button class="btn small ghost" onclick="openProvenance(\'evaluation.done\',' + evEntry.seq + ')">View evidence →</button></div>';
+      }
+    } catch (e5) {}
     el.innerHTML = html;
     el.style.display = "block";
   };
@@ -948,8 +1015,14 @@
           ui.last.cards = ""; // force re-render to show the command
           poll();
         } else {
-          var reason = (r.data && (r.data.reason || r.data.error)) || ("HTTP " + r.status);
-          notice("cards-notices", "Decision rejected: " + reason);
+          var d = r.data || {};
+          var reason = d.reason || d.error || ("HTTP " + r.status);
+          var msg = "Decision rejected: " + reason;
+          if (d.stale_base) {
+            msg += (d.guidance ? " " + d.guidance : "") +
+              " (main " + (d.mainHead || "").slice(0, 8) + " vs fork " + (d.forkHead || "").slice(0, 8) + ")";
+          }
+          notice("cards-notices", msg);
         }
       }).catch(function () { t.disabled = false; notice("cards-notices", "Request failed — is the API up?"); });
       return;

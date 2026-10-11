@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS intents (
   paths TEXT NOT NULL,          -- JSON array of path prefixes the agent intends to touch
   agent TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'declared', -- declared|forked|submitted|evaluated|decided
+  spec_commit TEXT,               -- sample main HEAD pinned at fork time (the spec the candidate is judged against)
   created_at INTEGER NOT NULL
 );
 
@@ -26,6 +27,8 @@ CREATE TABLE IF NOT EXISTS evaluations (
   pass INTEGER NOT NULL,         -- 0/1: all gates passed
   held_out_pass INTEGER,         -- 0/1/null
   summary TEXT DEFAULT '',       -- human-readable evidence summary
+  cost_usd REAL,                 -- AI cost for this eval (null = unknown)
+  cost_estimated INTEGER NOT NULL DEFAULT 0, -- 1 = estimated, 0 = metered
   evaluated_at INTEGER NOT NULL,
   FOREIGN KEY (candidate_id) REFERENCES candidates(id)
 );

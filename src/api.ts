@@ -75,6 +75,15 @@ export async function handleApi(req: Request, env: Env, url: URL): Promise<Respo
 			base = await env.ARTIFACTS.get(env.BASE_REPO);
 			forked = await base.fork(forkName, { description: `Fork for intent: ${intent.title}` });
 			const repoName = forked.name ?? forkName;
+			// Pin the spec: record the base main HEAD this fork was cut from.
+			// Evaluations are judged against this spec commit — the candidate
+			// cannot move its own goalposts.
+			let specCommit: string | null = null;
+			try {
+				const baseHead = await base.log({ ref: 'main', limit: 1 });
+				specCommit = baseHead?.[0]?.hash ?? null;
+			} catch {}
+			await env.DB.prepare(`UPDATE intents SET spec_commit = ? WHERE id = ?`).bind(specCommit, id).run();
 			const repoHandle: any = await env.ARTIFACTS.get(repoName);
 			let token: string;
 			try {
@@ -88,8 +97,8 @@ export async function handleApi(req: Request, env: Env, url: URL): Promise<Respo
 				.bind(candidateId, id, repoName)
 				.run();
 			await env.DB.prepare(`UPDATE intents SET status = 'forked' WHERE id = ?`).bind(id).run();
-			await ledger(env, 'fork.created', candidateId, { intent_id: id, repo: repoName });
-			return json({ candidate_id: candidateId, repo: repoName, remote: forked.remote, token });
+			await ledger(env, 'fork.created', candidateId, { intent_id: id, repo: repoName, spec_commit: specCommit });
+			return json({ candidate_id: candidateId, repo: repoName, remote: forked.remote, token, spec_commit: specCommit });
 		} catch (e: any) {
 			return json({ error: 'fork failed', detail: String(e?.message ?? e) }, 500);
 		} finally {
@@ -119,7 +128,8 @@ export async function handleApi(req: Request, env: Env, url: URL): Promise<Respo
 	if (method === 'GET' && path === '/api/cards') {
 		const { results } = await env.DB.prepare(
 			`SELECT i.*, c.id AS candidate_id, c.repo AS candidate_repo, c.commit_sha,
-			        e.id AS eval_id, e.checks, e.pass, e.held_out_pass, e.summary, e.evaluated_at
+			        e.id AS eval_id, e.checks, e.pass, e.held_out_pass, e.summary, e.evaluated_at,
+			        e.cost_usd, e.cost_estimated
 			 FROM intents i
 			 LEFT JOIN candidates c ON c.intent_id = i.id
 			 LEFT JOIN evaluations e ON e.id = (
@@ -132,7 +142,7 @@ export async function handleApi(req: Request, env: Env, url: URL): Promise<Respo
 			intent: { id: r.id, title: r.title, description: r.description, agent: r.agent, paths: parsePaths(r.paths), status: r.status },
 			candidate: r.candidate_id ? { id: r.candidate_id, repo: r.candidate_repo, commit: r.commit_sha } : null,
 			evaluation: r.eval_id
-				? { checks: JSON.parse(r.checks), pass: !!r.pass, held_out_pass: r.held_out_pass == null ? null : !!r.held_out_pass, summary: r.summary, evaluated_at: r.evaluated_at }
+				? { checks: JSON.parse(r.checks), pass: !!r.pass, held_out_pass: r.held_out_pass == null ? null : !!r.held_out_pass, summary: r.summary, evaluated_at: r.evaluated_at, cost_usd: r.cost_usd, cost_estimated: !!r.cost_estimated }
 				: null,
 		}));
 		return json(cards);
@@ -166,7 +176,17 @@ export async function handleApi(req: Request, env: Env, url: URL): Promise<Respo
 			const forkHead: string = forkLog[0].hash;
 			if (forkHead === mainHead) return json({ eligible: false, reason: 'nothing to promote' }, 409);
 			if (!forkLog.some((c: any) => c.hash === mainHead)) {
-				return json({ eligible: false, reason: 'candidate is not rebased onto current main', mainHead, forkHead }, 409);
+				return json(
+					{
+						eligible: false,
+						stale_base: true,
+						reason: 'candidate is not rebased onto current main',
+						guidance: 'Rebase the fork onto current main, push, and resubmit — the candidate will be re-evaluated before it can be promoted.',
+						mainHead,
+						forkHead,
+					},
+					409,
+				);
 			}
 			const token = await baseRepo.createToken('write', 60);
 			const decisionId = uid('dec');
