@@ -61,6 +61,8 @@ CREATE TABLE IF NOT EXISTS ledger (
   kind TEXT NOT NULL,            -- intent.declared|fork.created|candidate.submitted|evaluation.done|decision.made|promotion.done|undo.done
   ref_id TEXT,
   payload TEXT NOT NULL,         -- JSON
+  prev_hash TEXT,                -- V17: hash chain for tamper detection
+  hash TEXT,                     -- V17: SHA-256 of (prev_hash + kind + ref_id + payload + at)
   at INTEGER NOT NULL
 );
 

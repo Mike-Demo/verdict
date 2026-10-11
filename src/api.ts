@@ -223,6 +223,17 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 		if (!evaluation || !evaluation.pass) {
 			return json({ error: 'candidate has not passed evaluation gates' }, 409);
 		}
+		// V16 fix: if candidate touched test paths, require explicit human override.
+		// The candidate may have modified its own judge.
+		let evalChecks: any = {};
+		try { evalChecks = JSON.parse(evaluation.checks || '{}'); } catch {}
+		if (evalChecks.touched_tests && !body.override_test_touch) {
+			return json({
+				error: 'candidate touched test paths — human override required',
+				guidance: 'The candidate modified test files. If this was intentional, resubmit with override_test_touch=true.',
+				touched_tests: true,
+			}, 409);
+		}
 		// V5/V14 fix: the evaluated commit must match the candidate's current commit.
 		// If the agent pushed after evaluation, the tests didn't cover what's being promoted.
 		const evaluatedCommit = evaluation.commit_sha;
@@ -344,8 +355,29 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 				restore_token: token.plaintext,
 				expires_in: 300,
 				restore_ref: promo.prev_head,
-				note: 'Force-push the restore token to move main back to restore_ref, then confirm via /api/undo/confirm.',
+				note: 'Force-push main back to restore_ref using the token, then POST /api/undo/confirm with {promotion_id} to verify.',
 			});
+		} finally {
+			await disposeAll([baseRepo]);
+		}
+	}
+
+	// V7 fix: implement /api/undo/confirm (was referenced but missing)
+	if (method === 'POST' && path === '/api/undo/confirm') {
+		const body = (await req.json()) as { promotion_id: string };
+		const promo: any = await env.DB.prepare(`SELECT * FROM promotions WHERE id = ?`).bind(body.promotion_id).first();
+		if (!promo || !promo.undone) return json({ error: 'promotion not found or not undone' }, 404);
+		let baseRepo: any = null;
+		try {
+			baseRepo = await env.ARTIFACTS.get(env.BASE_REPO);
+			const mainLog = await baseRepo.log({ ref: 'main', limit: 1 });
+			if (!mainLog.length) return json({ error: 'cannot read main' }, 500);
+			const currentHead = mainLog[0].hash;
+			if (currentHead === promo.prev_head) {
+				await ledger(env, 'undo.confirmed', promo.id, { restored_to: currentHead });
+				return json({ confirmed: true, head: currentHead });
+			}
+			return json({ confirmed: false, current_head: currentHead, expected: promo.prev_head }, 409);
 		} finally {
 			await disposeAll([baseRepo]);
 		}

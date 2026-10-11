@@ -21,9 +21,19 @@ export async function ledger(
 	ref_id: string | null,
 	payload: unknown,
 ): Promise<void> {
+	// V17: hash chain for tamper detection
+	const at = now();
+	const payloadStr = JSON.stringify(payload);
+	const last: any = await env.DB.prepare(
+		`SELECT hash FROM ledger ORDER BY seq DESC LIMIT 1`
+	).first();
+	const prevHash = last?.hash ?? 'GENESIS';
+	const hashInput = `${prevHash}|${kind}|${ref_id ?? ''}|${payloadStr}|${at}`;
+	const hashBuf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(hashInput));
+	const hash = [...new Uint8Array(hashBuf)].map(b => b.toString(16).padStart(2, '0')).join('');
 	await env.DB.prepare(
-		`INSERT INTO ledger (kind, ref_id, payload, at) VALUES (?, ?, ?, ?)`,
-	).bind(kind, ref_id, JSON.stringify(payload), now()).run();
+		`INSERT INTO ledger (kind, ref_id, payload, prev_hash, hash, at) VALUES (?, ?, ?, ?, ?, ?)`,
+	).bind(kind, ref_id, payloadStr, prevHash, hash, at).run();
 }
 
 export async function getIntent(env: Env, id: string) {
