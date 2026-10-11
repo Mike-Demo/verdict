@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Verdict — Decision Forge</title>
+<style>
+  :root {
+    --bg0: #0e1013;
+    --bg1: #14171c;
+    --bg2: #1a1e25;
+    --bg3: #20262f;
+    --line: #262c37;
+    --line-soft: #1e232c;
+    --txt: #e9ebf1;
+    --mut: #9aa2b0;
+    --dim: #646c7a;
+    --amber: #e5a13c;
+    --amber-ink: #f4c26b;
+    --red: #dd5f5f;
+    --green: #5fb98a;
+    --blue: #6aa8e0;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
+    --r: 10px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg0);
+    color: var(--txt);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 0 24px 120px; }
+
+  /* ---------- header ---------- */
+  header.hero {
+    padding: 56px 0 8px;
+    border-bottom: 1px solid var(--line-soft);
+    margin-bottom: 40px;
+  }
+  .brand { display: flex; align-items: center; gap: 14px; }
+  .mark {
+    width: 34px; height: 34px; border: 2px solid var(--amber); border-radius: 8px;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: var(--amber); font-family: var(--mono); font-weight: 700; font-size: 18px;
+    flex: none;
+  }
+  h1.brand-name { font-size: 30px; margin: 0; letter-spacing: -0.02em; font-weight: 700; }
+  p.concept { color: var(--mut); font-size: 16px; margin: 10px 0 26px; }
+  p.concept strong { color: var(--txt); font-weight: 600; }
+  .live {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--mono); font-size: 12px; color: var(--dim);
+  }
+  .live .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+  .live .dot.stale { background: var(--red); }
+
+  /* ---------- sections ---------- */
+  section.block { margin-bottom: 44px; }
+  .block-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px; }
+  h2.sec-title { font-size: 13px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--dim); margin: 0; font-weight: 600; }
+  .sec-count { font-family: var(--mono); font-size: 12px; color: var(--dim); }
+  .sec-hint { color: var(--dim); font-size: 13px; margin-left: auto; }
+
+  .card {
+    background: var(--bg1);
+    border: 1px solid var(--line-soft);
+    border-radius: var(--r);
+    padding: 20px 22px;
+    margin-bottom: 14px;
+  }
+  .card.accent { border-color: #3a2f1c; background: #171712; }
+  .empty {
+    border: 1px dashed var(--line);
+    border-radius: var(--r);
+    padding: 28px 24px;
+    color: var(--dim);
+    font-size: 14px;
+    text-align: center;
+  }
+  .empty strong { color: var(--mut); font-weight: 600; }
+
+  /* ---------- pills & badges ---------- */
+  .pill, .heat {
+    display: inline-flex; align-items: center;
+    font-size: 11.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line);
+    color: var(--mut); background: var(--bg2); white-space: nowrap;
+  }
+  .pill.st-declared { color: var(--mut); }
+  .pill.st-forked { color: var(--blue); border-color: #27405c; }
+  .pill.st-submitted { color: var(--amber-ink); border-color: #4a3a20; }
+  .pill.st-evaluated { color: var(--amber-ink); border-color: #4a3a20; }
+  .pill.st-decided { color: var(--green); border-color: #24473a; }
+  .pill.st-promoted { color: var(--green); border-color: #24473a; background: #14201b; }
+  .heat.clear { color: var(--dim); }
+  .heat.warm { color: var(--amber-ink); border-color: #4a3a20; background: #1d1810; }
+  .heat.hot { color: #f08a8a; border-color: #552a2a; background: #201414; }
+
+  /* ---------- intent rows ---------- */
+  .intent-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+  .intent-title { font-size: 16.5px; font-weight: 650; margin: 0; }
+  .intent-meta { color: var(--dim); font-size: 13px; margin: 6px 0; }
+  .intent-meta .agent { color: var(--mut); font-weight: 600; }
+  .paths { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
+  .path {
+    font-family: var(--mono); font-size: 12px; color: var(--amber-ink);
+    background: #1d1810; border: 1px solid #3a2f1c; border-radius: 6px; padding: 2px 8px;
+  }
+  .cand-line { font-family: var(--mono); font-size: 12.5px; color: var(--mut); margin-top: 8px; }
+  .cand-line .sha { color: var(--txt); }
+  .mono { font-family: var(--mono); font-size: 12.5px; }
+
+  /* ---------- forms ---------- */
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 640px) { .grid2 { grid-template-columns: 1fr; } }
+  label.f { display: block; font-size: 12.5px; font-weight: 600; color: var(--mut); margin-bottom: 6px; letter-spacing: 0.02em; }
+  input[type=text], textarea {
+    width: 100%; background: var(--bg2); border: 1px solid var(--line); border-radius: 8px;
+    color: var(--txt); font-size: 14px; padding: 10px 12px; font-family: var(--sans);
+  }
+  textarea { resize: vertical; min-height: 64px; }
+  input[type=text]:focus, textarea:focus { outline: none; border-color: var(--amber); }
+  input[type=text]::placeholder, textarea::placeholder { color: var(--dim); }
+  .field { margin-bottom: 14px; }
+  .mono-input { font-family: var(--mono); font-size: 13px; }
+
+  .btn {
+    appearance: none; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--bg3); color: var(--txt); font-size: 14px; font-weight: 600;
+    padding: 10px 18px; cursor: pointer; font-family: var(--sans);
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+  .btn:hover { border-color: var(--dim); }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn.primary { background: var(--amber); border-color: var(--amber); color: #171204; }
+  .btn.primary:hover { background: var(--amber-ink); }
+  .btn.danger { color: #f08a8a; border-color: #552a2a; background: #201414; }
+  .btn.ghost { background: transparent; }
+  .btn.small { font-size: 12.5px; padding: 7px 12px; }
+
+  /* ---------- decision cards ---------- */
+  .checks { margin: 14px 0; border: 1px solid var(--line-soft); border-radius: 8px; overflow: hidden; }
+  .check-row {
+    display: flex; align-items: center; gap: 12px; padding: 8px 14px;
+    border-bottom: 1px solid var(--line-soft); font-size: 13.5px;
+  }
+  .check-row:last-child { border-bottom: none; }
+  .check-row .nm { font-family: var(--mono); font-size: 12.5px; color: var(--mut); }
+  .mark-ok, .mark-bad, .mark-na {
+    width: 20px; height: 20px; border-radius: 6px; flex: none;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 700; font-family: var(--mono);
+  }
+  .mark-ok { background: #14281e; color: var(--green); border: 1px solid #24473a; }
+  .mark-bad { background: #2a1515; color: var(--red); border: 1px solid #552a2a; }
+  .mark-na { background: var(--bg2); color: var(--dim); border: 1px solid var(--line); }
+  .summary { color: var(--mut); font-size: 13.5px; margin: 10px 0 4px; }
+  .summary strong { color: var(--txt); }
+  .heldout { font-size: 13px; margin: 6px 0; }
+
+  .cmd-block {
+    position: relative; background: #0b0d10; border: 1px solid var(--line);
+    border-radius: 8px; padding: 14px 16px; margin: 14px 0;
+    font-family: var(--mono); font-size: 12.5px; line-height: 1.6;
+    overflow-x: auto; white-space: pre-wrap; word-break: break-all; color: #cfe3c8;
+  }
+  .cmd-block .lbl { display: block; color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 8px; }
+  .copy-btn {
+    position: absolute; top: 10px; right: 10px;
+    font-size: 11.5px; padding: 5px 10px;
+  }
+  .token-note { font-size: 12.5px; color: var(--amber-ink); margin: 8px 0; }
+
+  /* ---------- ledger ---------- */
+  .ledger-row {
+    display: flex; gap: 14px; padding: 10px 4px; border-bottom: 1px solid var(--line-soft);
+    font-size: 13.5px; align-items: baseline;
+  }
+  .ledger-row:last-child { border-bottom: none; }
+  .ledger-seq { font-family: var(--mono); font-size: 11.5px; color: var(--dim); width: 44px; flex: none; }
+  .ledger-kind {
+    font-family: var(--mono); font-size: 11px; color: var(--amber-ink); flex: none; width: 150px;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .ledger-kind.k-promotion { color: var(--green); }
+  .ledger-kind.k-undo { color: #f08a8a; }
+  .ledger-time { margin-left: auto; font-family: var(--mono); font-size: 11.5px; color: var(--dim); flex: none; }
+  .ledger-msg { color: var(--mut); }
+  .ledger-msg strong { color: var(--txt); font-weight: 600; }
+
+  /* ---------- notices ---------- */
+  .notice {
+    border: 1px solid #552a2a; background: #201414; color: #f0a8a8;
+    border-radius: 8px; padding: 12px 16px; margin-bottom: 14px; font-size: 13.5px;
+    display: flex; gap: 12px; align-items: flex-start;
+  }
+  .notice.info { border-color: #27405c; background: #131a24; color: #a9c8e8; }
+  .notice button.dismiss {
+    margin-left: auto; background: none; border: none; color: inherit; cursor: pointer;
+    font-size: 16px; line-height: 1; padding: 0 0 0 8px; flex: none;
+  }
+  .api-down {
+    border: 1px dashed var(--line); border-radius: 8px; padding: 12px 16px; margin-bottom: 20px;
+    color: var(--dim); font-size: 13px; text-align: center; display: none;
+  }
+  .promo-head { font-family: var(--mono); font-size: 12.5px; color: var(--mut); margin: 8px 0; }
+  .promo-head .sha { color: var(--txt); }
+  footer.foot { margin-top: 60px; color: var(--dim); font-size: 12.5px; border-top: 1px solid var(--line-soft); padding-top: 20px; }
+  footer.foot code { font-family: var(--mono); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <div class="brand">
+      <span class="mark">V</span>
+      <h1 class="brand-name">Verdict</h1>
+    </div>
+    <p class="concept"><strong>Agents declare intent. Evidence decides. Humans approve.</strong><br>
+    A decision forge for agentic coding: competing agents fork in isolation, deterministic gates judge the work, and you promote exactly one winner per intent.</p>
+    <div class="live"><span class="dot" id="live-dot"></span><span id="live-text">connecting…</span></div>
+  </header>
+
+  <div class="api-down" id="api-down">API unreachable — retrying. The Worker serving <code>/api</code> may not be up yet.</div>
+
+  <main>
+    <section class="block" id="sec-declare">
+      <div class="block-head"><h2 class="sec-title">Declare intent</h2></div>
+      <div id="declare-notices"></div>
+      <form class="card" id="intent-form" autocomplete="off">
+        <div class="grid2">
+          <div class="field">
+            <label class="f" for="f-title">Title</label>
+            <input type="text" id="f-title" placeholder="e.g. Add retry logic to link checker" required maxlength="120">
+          </div>
+          <div class="field">
+            <label class="f" for="f-agent">Agent name</label>
+            <input type="text" id="f-agent" placeholder="e.g. agent-7" required maxlength="60">
+          </div>
+        </div>
+        <div class="field">
+          <label class="f" for="f-desc">Description</label>
+          <textarea id="f-desc" placeholder="What will change and why — one or two sentences." maxlength="500"></textarea>
+        </div>
+        <div class="field">
+          <label class="f" for="f-paths">Paths (comma-separated prefixes)</label>
+          <input type="text" id="f-paths" class="mono-input" placeholder="src/links, src/validation" required>
+        </div>
+        <button class="btn primary" type="submit" id="declare-btn">Declare intent</button>
+      </form>
+    </section>
+
+    <section class="block" id="sec-intents">
+      <div class="block-head">
+        <h2 class="sec-title">Active intents</h2><span class="sec-count" id="intents-count"></span>
+        <span class="sec-hint">heat is a path-overlap badge only — not a conflict claim</span>
+      </div>
+      <div id="intents-notices"></div>
+      <div id="intents-list"></div>
+    </section>
+
+    <section class="block" id="sec-queue">
+      <div class="block-head">
+        <h2 class="sec-title">Decision queue</h2><span class="sec-count" id="cards-count"></span>
+        <span class="sec-hint">one card per intent · queue capped at 5</span>
+      </div>
+      <div id="cards-notices"></div>
+      <div id="cards-list"></div>
+    </section>
+
+    <section class="block" id="sec-ledger">
+      <div class="block-head"><h2 class="sec-title">Ledger</h2><span class="sec-hint">append-only · newest first</span></div>
+      <div class="card" style="padding: 6px 22px;" id="ledger-list"></div>
+    </section>
+
+    <section class="block" id="sec-promos">
+      <div class="block-head"><h2 class="sec-title">Promotions</h2><span class="sec-hint">one-click undo restores the previous main</span></div>
+      <div id="promos-notices"></div>
+      <div id="promos-list"></div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    Verdict prototype UI — single file, no build step. Polls <code>/api/intents</code>, <code>/api/cards</code>, <code>/api/ledger</code> every 3 s.
+  </footer>
+</div>
+<script>
+(function () {
+  "use strict";
+  var HOST = "827e5ee14288e20217417d7e2463d88d.artifacts.cloudflare.net";
+  var BASE_REPO = "verdict-prototype/sample";
+
+  var ui = {
+    rationales: {},   // intentId -> rationale text (survives re-render)
+    decisions: {},    // intentId -> { decision_id, promotion_token, mainHead, forkHead, expires_in, confirmed }
+    undos: {},        // promotionId -> { restore_token, restore_ref }
+    last: { intents: "", cards: "", ledger: "" },
+    apiOk: false
+  };
+
+  /* ---------- helpers ---------- */
+  function esc(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+  function short(sha) { return sha ? String(sha).slice(0, 7) : "—"; }
+  function fmtTime(t) {
+    if (!t) return "";
+    var d = new Date(typeof t === "number" ? t * 1000 : t);
+    return isNaN(d.getTime()) ? String(t) : d.toLocaleString();
+  }
+  function api(path, opts) {
+    return fetch(path, opts).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (data) {
+        return { ok: res.ok, status: res.status, data: data };
+      });
+    });
+  }
+  function $(id) { return document.getElementById(id); }
+
+  function notice(areaId, msg, kind) {
+    var area = $(areaId);
+    var div = document.createElement("div");
+    div.className = "notice" + (kind === "info" ? " info" : "");
+    var span = document.createElement("span");
+    span.textContent = msg;
+    var btn = document.createElement("button");
+    btn.className = "dismiss";
+    btn.setAttribute("aria-label", "dismiss");
+    btn.textContent = "×";
+    btn.onclick = function () { div.remove(); };
+    div.appendChild(span);
+    div.appendChild(btn);
+    area.appendChild(div);
+  }
+
+  /* ---------- badges ---------- */
+  function heatBadge(n) {
+    n = Number(n) || 0;
+    if (n <= 0) return '<span class="heat clear">no overlap</span>';
+    if (n === 1) return '<span class="heat warm">1 overlap</span>';
+    return '<span class="heat hot">' + n + ' overlaps</span>';
+  }
+  function statusPill(s) {
+    s = s || "declared";
+    return '<span class="pill st-' + esc(s) + '">' + esc(s) + '</span>';
+  }
+
+  /* ---------- intents ---------- */
+  function renderIntents(list) {
+    var key = JSON.stringify(list);
+    if (key === ui.last.intents) return;
+    ui.last.intents = key;
+    var el = $("intents-list");
+    $("intents-count").textContent = list.length ? "(" + list.length + " / 5)" : "";
+    if (!list.length) {
+      el.innerHTML = '<div class="empty"><strong>No active intents.</strong><br>Declare an intent to begin — agents compete by declaring what they intend to change.</div>';
+      return;
+    }
+    el.innerHTML = list.map(function (it) {
+      var paths = (it.paths || []).map(function (p) {
+        return '<span class="path">' + esc(p) + '</span>';
+      }).join("");
+      var cand = it.candidate
+        ? '<div class="cand-line">candidate <span class="sha">' + esc(short(it.candidate.commit_sha)) + '</span> · ' + esc(it.candidate.repo || "") + '</div>'
+        : "";
+      return '<div class="card">' +
+        '<div class="intent-top">' +
+          '<h3 class="intent-title">' + esc(it.title) + '</h3>' +
+          statusPill(it.status) + heatBadge(it.heat) +
+        '</div>' +
+        '<div class="intent-meta">declared by <span class="agent">' + esc(it.agent) + '</span> · <span class="mono">' + esc(it.id) + '</span></div>' +
+        (it.description ? '<div class="intent-meta">' + esc(it.description) + '</div>' : "") +
+        '<div class="paths">' + paths + '</div>' + cand +
+      '</div>';
+    }).join("");
+  }
+
+  /* ---------- decision cards ---------- */
+  var CHECK_LABELS = {
+    commitFound: "commit found",
+    hasPackageJson: "package.json present",
+    hasTestScript: "test script present",
+    installOk: "install ok",
+    visibleTestsPass: "visible tests pass",
+    heldOutTestsPass: "held-out tests pass"
+  };
+  function checkRow(keyName, val) {
+    var mark, label = CHECK_LABELS[keyName] || keyName;
+    if (val === true) mark = '<span class="mark-ok">✓</span>';
+    else if (val === false) mark = '<span class="mark-bad">✕</span>';
+    else mark = '<span class="mark-na">·</span>';
+    var extra = (val !== true && val !== false) ? ' <span style="color:var(--dim)">(pending)</span>' : "";
+    return '<div class="check-row">' + mark + '<span class="nm">' + esc(label) + '</span>' + extra + '</div>';
+  }
+  function renderCards(list) {
+    var key = JSON.stringify(list);
+    if (key === ui.last.cards && !Object.keys(ui.decisions).length) return;
+    // Don't clobber a rationale being typed: skip this render pass, retry next poll.
+    var active = document.activeElement;
+    if (active && $("cards-list").contains(active) && /^(TEXTAREA|INPUT)$/.test(active.tagName)) return;
+    ui.last.cards = key;
+    var el = $("cards-list");
+    $("cards-count").textContent = list.length ? "(" + list.length + ")" : "";
+    if (!list.length) {
+      el.innerHTML = '<div class="empty"><strong>No candidates awaiting decision.</strong><br>Evaluated candidates appear here as decision cards — one per intent.</div>';
+      return;
+    }
+    el.innerHTML = list.map(function (c) {
+      var it = c.intent || {};
+      var cand = c.candidate || {};
+      var ev = c.evaluation || null;
+      var intentId = it.id || "";
+      var checksHtml = "";
+      if (ev && ev.checks) {
+        checksHtml = '<div class="checks">' + Object.keys(CHECK_LABELS).map(function (k) {
+          return checkRow(k, ev.checks[k]);
+        }).join("") + "</div>";
+      }
+      var heldOut = "";
+      if (ev) {
+        if (ev.held_out_pass === true) heldOut = '<div class="heldout">held-out tests: <span style="color:var(--green);font-weight:600">pass</span></div>';
+        else if (ev.held_out_pass === false) heldOut = '<div class="heldout">held-out tests: <span style="color:var(--red);font-weight:600">fail</span></div>';
+        else heldOut = '<div class="heldout">held-out tests: <span style="color:var(--dim)">pending</span></div>';
+      }
+      var verdictLine = ev
+        ? '<div class="summary">gates: <strong>' + (ev.pass ? "pass" : "fail") + '</strong>' + (ev.summary ? " — " + esc(ev.summary) : "") + "</div>"
+        : '<div class="summary">evaluation pending…</div>';
+
+      var dec = ui.decisions[intentId];
+      var actionHtml;
+      if (dec && dec.confirmed) {
+        actionHtml = '<div class="notice info" style="margin:14px 0 0"><span>Promoted — main is now at <span class="mono">' + esc(short(dec.new_head)) + '</span>. See Promotions below to undo.</span></div>';
+      } else if (dec && dec.promotion_token) {
+        var cmd = "git push https://x:" + dec.promotion_token + "@" + HOST + "/git/" + BASE_REPO + ".git " + dec.forkHead + ":main";
+        actionHtml =
+          '<div class="token-note">Gates passed and candidate is rebased. Hand this to the winning agent — the token expires in ' + esc(String(dec.expires_in || 60)) + 's.</div>' +
+          '<div class="cmd-block" id="cmd-' + esc(intentId) + '"><span class="lbl">agent push command</span>' +
+            '<button class="btn small ghost copy-btn" data-action="copy" data-target="cmd-' + esc(intentId) + '">copy</button>' +
+            '<span class="cmd-text">' + esc(cmd) + "</span></div>" +
+          '<button class="btn primary" data-action="confirm" data-intent="' + esc(intentId) + '" data-decision="' + esc(dec.decision_id) + '">Confirm promotion</button>';
+      } else {
+        var rat = ui.rationales[intentId] || "";
+        actionHtml =
+          '<div class="field" style="margin-top:14px"><label class="f" for="rat-' + esc(intentId) + '">Rationale (recorded in the ledger)</label>' +
+          '<textarea id="rat-' + esc(intentId) + '" data-rationale="' + esc(intentId) + '" placeholder="Why does this candidate win? Cite the evidence above.">' + esc(rat) + "</textarea></div>" +
+          '<button class="btn primary" data-action="promote" data-intent="' + esc(intentId) + '" data-candidate="' + esc(cand.id || "") + '">Promote</button>';
+      }
+
+      return '<div class="card accent">' +
+        '<div class="intent-top">' +
+          '<h3 class="intent-title">' + esc(it.title || "untitled") + '</h3>' + statusPill(it.status) +
+        '</div>' +
+        '<div class="intent-meta">by <span class="agent">' + esc(it.agent || "?") + '</span> · candidate <span class="mono">' + esc(cand.repo || "") + "@" + esc(short(cand.commit)) + "</span></div>" +
+        checksHtml + heldOut + verdictLine + actionHtml +
+      "</div>";
+    }).join("");
+  }
+
+  /* ---------- ledger ---------- */
+  function ledgerLine(e) {
+    var p = e.payload || {};
+    var strong = function (s) { return "<strong>" + esc(s) + "</strong>"; };
+    switch (e.kind) {
+      case "intent.declared":
+        return "Intent declared — " + strong(p.title || e.ref_id) + " by " + esc(p.agent || "?");
+      case "fork.created":
+        return "Fork created — " + strong(p.repo || e.ref_id);
+      case "candidate.submitted":
+        return "Candidate submitted — " + strong(short(p.commit_sha || p.commit || e.ref_id));
+      case "evaluation.done":
+        return "Evaluation done — " + strong(p.pass === false ? "fail" : p.pass === true ? "pass" : "recorded");
+      case "decision.made":
+        return "Decision made — " + strong(p.intent_id || e.ref_id) + (p.rationale ? " · “" + esc(String(p.rationale).slice(0, 80)) + "”" : "");
+      case "promotion.done":
+        return "Promoted — " + strong(short(p.prev_head)) + " → " + strong(short(p.new_head));
+      case "undo.done":
+        return "Undone — main restored to " + strong(short(p.restore_ref || e.ref_id));
+      default:
+        return esc(e.kind || "event") + " — " + esc(e.ref_id || "");
+    }
+  }
+  function renderLedger(list) {
+    var key = JSON.stringify(list);
+    if (key === ui.last.ledger) return;
+    ui.last.ledger = key;
+    var el = $("ledger-list");
+    var sorted = (list || []).slice().sort(function (a, b) { return (b.seq || 0) - (a.seq || 0); });
+    if (!sorted.length) {
+      el.innerHTML = '<div class="empty" style="border:none"><strong>No ledger entries yet.</strong><br>Every declaration, fork, evaluation, decision, promotion and undo lands here.</div>';
+      return;
+    }
+    el.innerHTML = sorted.map(function (e) {
+      var kcls = e.kind === "promotion.done" ? "ledger-kind k-promotion" : (e.kind === "undo.done" ? "ledger-kind k-undo" : "ledger-kind");
+      return '<div class="ledger-row">' +
+        '<span class="ledger-seq">#' + esc(String(e.seq == null ? "–" : e.seq)) + "</span>" +
+        '<span class="' + kcls + '">' + esc(e.kind || "") + "</span>" +
+        '<span class="ledger-msg">' + ledgerLine(e) + "</span>" +
+        '<span class="ledger-time">' + esc(fmtTime(e.at)) + "</span>" +
+      "</div>";
+    }).join("");
+  }
+
+  /* ---------- promotions (derived from ledger) ---------- */
+  function renderPromotions(ledger) {
+    var promos = (ledger || []).filter(function (e) { return e.kind === "promotion.done"; })
+      .sort(function (a, b) { return (b.seq || 0) - (a.seq || 0); });
+    var el = $("promos-list");
+    if (!promos.length) {
+      el.innerHTML = '<div class="empty"><strong>No promotions yet.</strong><br>Confirmed promotions appear here, each with one-click undo.</div>';
+      return;
+    }
+    el.innerHTML = promos.map(function (e) {
+      var p = e.payload || {};
+      var pid = p.promotion_id || e.ref_id || String(e.seq);
+      var undo = ui.undos[pid];
+      var undoHtml;
+      if (undo) {
+        var cmd = "git push --force https://x:" + undo.restore_token + "@" + HOST + "/git/" + BASE_REPO + ".git " + undo.restore_ref + ":main";
+        undoHtml = '<div class="cmd-block" id="undo-' + esc(pid) + '"><span class="lbl">restore command — force-push main back</span>' +
+          '<button class="btn small ghost copy-btn" data-action="copy" data-target="undo-' + esc(pid) + '">copy</button>' +
+          '<span class="cmd-text">' + esc(cmd) + "</span></div>";
+      } else {
+        undoHtml = '<button class="btn danger small" data-action="undo" data-promotion="' + esc(pid) + '">Undo</button>';
+      }
+      return '<div class="card">' +
+        '<div class="intent-top">' +
+          '<h3 class="intent-title">Promotion #' + esc(String(e.seq == null ? "?" : e.seq)) + "</h3>" +
+          '<span class="pill st-promoted">promoted</span>' +
+        "</div>" +
+        '<div class="promo-head"><span class="sha">' + esc(short(p.prev_head)) + '</span> → <span class="sha">' + esc(short(p.new_head)) + '</span>' +
+        ' <span style="color:var(--dim)">· ' + esc(fmtTime(e.at)) + "</span></div>" +
+        undoHtml +
+      "</div>";
+    }).join("");
+  }
+
+  /* ---------- polling ---------- */
+  function setLive(ok) {
+    ui.apiOk = ok;
+    $("live-dot").className = "dot" + (ok ? "" : " stale");
+    $("live-text").textContent = ok ? "live · polling every 3s" : "api unreachable";
+    $("api-down").style.display = ok ? "none" : "block";
+  }
+  function poll() {
+    Promise.all([api("/api/intents"), api("/api/cards"), api("/api/ledger")]).then(function (rs) {
+      var okAll = rs.every(function (r) { return r.ok; });
+      setLive(okAll);
+      if (!okAll) return;
+      renderIntents(rs[0].data);
+      renderCards(rs[1].data);
+      renderLedger(rs[2].data);
+      renderPromotions(rs[2].data);
+    }).catch(function () { setLive(false); });
+  }
+
+  /* ---------- actions ---------- */
+  document.addEventListener("input", function (ev) {
+    var t = ev.target;
+    if (t && t.getAttribute && t.getAttribute("data-rationale")) {
+      ui.rationales[t.getAttribute("data-rationale")] = t.value;
+    }
+  });
+
+  document.addEventListener("click", function (ev) {
+    var t = ev.target.closest ? ev.target.closest("[data-action]") : null;
+    if (!t) return;
+    var action = t.getAttribute("data-action");
+
+    if (action === "copy") {
+      var block = $(t.getAttribute("data-target"));
+      var text = block ? block.querySelector(".cmd-text").textContent : "";
+      var done = function () { t.textContent = "copied"; setTimeout(function () { t.textContent = "copy"; }, 1500); };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, function () { fallbackCopy(text); done(); });
+      } else { fallbackCopy(text); done(); }
+      return;
+    }
+    if (action === "promote") {
+      var intentId = t.getAttribute("data-intent");
+      var candidateId = t.getAttribute("data-candidate");
+      var rationale = (ui.rationales[intentId] || "").trim();
+      if (!rationale) { notice("cards-notices", "Add a short rationale before promoting — it is recorded in the ledger.", "info"); return; }
+      t.disabled = true;
+      api("/api/decide", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ intent_id: intentId, candidate_id: candidateId, rationale: rationale })
+      }).then(function (r) {
+        t.disabled = false;
+        if (r.ok) {
+          ui.decisions[intentId] = {
+            decision_id: r.data.decision_id,
+            promotion_token: r.data.promotion_token,
+            mainHead: r.data.mainHead,
+            forkHead: r.data.forkHead,
+            expires_in: r.data.expires_in,
+            confirmed: false
+          };
+          ui.last.cards = ""; // force re-render to show the command
+          poll();
+        } else {
+          var reason = (r.data && (r.data.reason || r.data.error)) || ("HTTP " + r.status);
+          notice("cards-notices", "Decision rejected: " + reason);
+        }
+      }).catch(function () { t.disabled = false; notice("cards-notices", "Request failed — is the API up?"); });
+      return;
+    }
+    if (action === "confirm") {
+      var di = t.getAttribute("data-intent");
+      var decisionId = t.getAttribute("data-decision");
+      t.disabled = true;
+      api("/api/promotions/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decision_id: decisionId })
+      }).then(function (r) {
+        t.disabled = false;
+        if (r.ok && r.data.confirmed) {
+          if (ui.decisions[di]) {
+            ui.decisions[di].confirmed = true;
+            ui.decisions[di].new_head = r.data.new_head;
+          }
+          ui.last.cards = "";
+          poll();
+        } else {
+          var reason = (r.data && (r.data.reason || r.data.error)) || ("HTTP " + r.status);
+          notice("cards-notices", "Confirm failed: " + reason + " — make sure the agent push completed first.");
+        }
+      }).catch(function () { t.disabled = false; notice("cards-notices", "Request failed — is the API up?"); });
+      return;
+    }
+    if (action === "undo") {
+      var pid = t.getAttribute("data-promotion");
+      t.disabled = true;
+      api("/api/undo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ promotion_id: pid })
+      }).then(function (r) {
+        t.disabled = false;
+        if (r.ok && r.data.undone) {
+          ui.undos[pid] = { restore_token: r.data.restore_token, restore_ref: r.data.restore_ref };
+          poll();
+        } else {
+          var reason = (r.data && (r.data.reason || r.data.error)) || ("HTTP " + r.status);
+          notice("promos-notices", "Undo failed: " + reason);
+        }
+      }).catch(function () { t.disabled = false; notice("promos-notices", "Request failed — is the API up?"); });
+      return;
+    }
+  });
+
+  function fallbackCopy(text) {
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); } catch (e) {}
+    document.body.removeChild(ta);
+  }
+
+  /* ---------- declare form ---------- */
+  $("intent-form").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var btn = $("declare-btn");
+    var paths = $("f-paths").value.split(",").map(function (s) { return s.trim(); }).filter(Boolean);
+    var body = {
+      title: $("f-title").value.trim(),
+      description: $("f-desc").value.trim(),
+      paths: paths,
+      agent: $("f-agent").value.trim()
+    };
+    if (!body.title || !body.agent || !paths.length) {
+      notice("declare-notices", "Title, agent name, and at least one path are required.", "info");
+      return;
+    }
+    btn.disabled = true;
+    api("/api/intents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }).then(function (r) {
+      btn.disabled = false;
+      if (r.ok) {
+        var heatTxt = r.data.heat >= 2 ? r.data.heat + " overlaps" : (r.data.heat === 1 ? "1 overlap" : "no overlap");
+        notice("declare-notices", "Intent declared (" + (r.data.id || "") + ") — heat: " + heatTxt + ".", "info");
+        $("intent-form").reset();
+        poll();
+      } else {
+        var msg = (r.data && (r.data.error || r.data.reason)) || ("HTTP " + r.status);
+        notice("declare-notices", msg);
+      }
+    }).catch(function () { btn.disabled = false; notice("declare-notices", "Request failed — is the API up?"); });
+  });
+
+  /* ---------- go ---------- */
+  poll();
+  setInterval(poll, 3000);
+})();
+</script>
+</body>
+</html>

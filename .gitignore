@@ -1,0 +1,11 @@
+node_modules/
+.wrangler/
+.dev.vars
+.internal-secret
+.DS_Store
+# Held-out tests are the secret answer key — never commit them.
+# Provide your own via: wrangler secret put HELD_OUT_TESTS < your-heldout.test.js
+heldout.test.js
+# Sample project git metadata and deps are not part of the repo
+sample/.git/
+sample/node_modules/

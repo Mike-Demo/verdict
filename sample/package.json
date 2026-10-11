@@ -1,0 +1,1 @@
+{"description":"A tiny in-memory URL shortener library.","devDependencies":{"vitest":"^3.2.0"},"name":"linklet","scripts":{"test":"vitest run"},"type":"module","version":"1.0.0"}

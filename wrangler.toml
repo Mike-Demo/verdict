@@ -1,0 +1,42 @@
+name = "verdict"
+main = "src/index.ts"
+compatibility_date = "2026-10-11"
+
+[assets]
+directory = "./public"
+
+[vars]
+BASE_REPO = "sample"
+NAMESPACE = "verdict-prototype"
+# Replace with your Artifacts host: <account-id>.artifacts.cloudflare.net
+ACCOUNT_HOST = "YOUR_ACCOUNT_ID.artifacts.cloudflare.net"
+
+[[artifacts]]
+binding = "ARTIFACTS"
+namespace = "verdict-prototype"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "verdict-db"
+database_id = "c96f502f-76c1-4aea-bdbf-7eab306f1cb2"
+
+[[queues.producers]]
+binding = "EVAL_QUEUE"
+queue = "verdict-eval-q"
+
+[[queues.consumers]]
+queue = "verdict-eval-q"
+
+[[durable_objects.bindings]]
+name = "SANDBOX"
+class_name = "Sandbox"
+
+[[containers]]
+class_name = "Sandbox"
+image = "docker.io/cloudflare/sandbox:0.9.4"
+instance_type = "standard-1"
+max_instances = 10
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Sandbox"]

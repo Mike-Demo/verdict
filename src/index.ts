@@ -1,0 +1,57 @@
+import { WorkflowEntrypoint } from 'cloudflare:workers';
+import { Sandbox } from '@cloudflare/sandbox';
+import { Env } from './db';
+import { handleApi } from './api';
+import { runEvaluation } from './evaluate';
+import { getSandbox } from '@cloudflare/sandbox';
+
+export { Sandbox } from '@cloudflare/sandbox';
+
+export default {
+	async fetch(req: Request, env: Env): Promise<Response> {
+		const url = new URL(req.url);
+		// because the Sandbox binding only initializes in fetch context.
+		if (url.pathname === '/api/internal/eval' && req.method === 'POST') {
+			if (req.headers.get('x-verdict-secret') !== env.INTERNAL_SECRET) {
+				return Response.json({ error: 'forbidden' }, 403);
+			}
+			const params = (await req.json()) as any;
+			if (new URL(req.url).searchParams.get('noop') === '1') {
+				return Response.json({ ok: true, noop: true, params });
+			}
+			try {
+				const result = await runEvaluation(env, params);
+				return Response.json({ ok: true, result });
+			} catch (e: any) {
+				return Response.json({ ok: false, error: String(e?.message ?? e).slice(0, 500) }, 500);
+			}
+		}
+		if (url.pathname.startsWith('/api/')) {
+			return handleApi(req, env, url);
+		}
+		// UI is served as static assets; fall through to assets binding in production.
+		// In the prototype the single index.html is inlined via [site] — see wrangler.toml.
+		return new Response('Verdict — intent-led decision forge. UI at /.', {
+			headers: { 'content-type': 'text/plain' },
+		});
+	},
+
+	async queue(batch: MessageBatch<any>, env: Env): Promise<void> {
+		for (const msg of batch.messages) {
+			try {
+				// Self-fetch: the Sandbox binding only initializes in fetch
+				// context, so the consumer delegates the heavy eval to an
+				// internal HTTP endpoint instead of running it inline.
+				const res = await fetch('https://verdict.hey-demo-827.workers.dev/api/internal/eval', {
+					method: 'POST',
+					headers: { 'content-type': 'application/json', 'x-verdict-secret': env.INTERNAL_SECRET },
+					body: JSON.stringify(msg.body),
+				});
+				if (res.ok) msg.ack();
+				else msg.retry();
+			} catch (e) {
+				msg.retry();
+			}
+		}
+	},
+};
