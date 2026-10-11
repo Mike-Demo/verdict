@@ -11,6 +11,9 @@ NAMESPACE = "verdict-prototype"
 # Replace with your Artifacts host: <account-id>.artifacts.cloudflare.net
 ACCOUNT_HOST = "YOUR_ACCOUNT_ID.artifacts.cloudflare.net"
 
+[ai]
+binding = "AI"
+
 [[artifacts]]
 binding = "ARTIFACTS"
 namespace = "verdict-prototype"

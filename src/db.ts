@@ -5,6 +5,7 @@ export interface Env {
 	DB: D1Database;
 	EVAL_QUEUE: Queue;
 	SANDBOX: DurableObjectNamespace;
+	AI: any;
 	HELD_OUT_TESTS: string;
 	INTERNAL_SECRET: string;
 	BASE_REPO: string;

@@ -256,6 +256,17 @@
       </form>
     </section>
 
+    <section class="block" id="sec-map">
+      <div class="block-head">
+        <h2 class="sec-title">Live map</h2>
+        <span class="sec-hint">halo = path-overlap heat (red high · amber medium · grey low)</span>
+      </div>
+      <div id="live-map" style="background:var(--bg1);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;min-height:280px;position:relative;">
+        <svg id="map-svg" width="100%" height="320" style="display:block;"></svg>
+        <div id="map-empty" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:13px;">No active intents — declare one above to see the map.</div>
+      </div>
+    </section>
+
     <section class="block" id="sec-intents">
       <div class="block-head">
         <h2 class="sec-title">Active intents</h2><span class="sec-count" id="intents-count"></span>
@@ -433,6 +444,15 @@
       var verdictLine = ev
         ? '<div class="summary">gates: <strong>' + (ev.pass ? "pass" : "fail") + '</strong>' + (ev.summary ? " — " + esc(ev.summary) : "") + "</div>"
         : '<div class="summary">evaluation pending…</div>';
+      var judgeHtml = "";
+      try {
+        var checksObj = typeof ev.checks === 'string' ? JSON.parse(ev.checks) : ev.checks;
+        if (checksObj && checksObj.judge && checksObj.judge.summary) {
+          judgeHtml = '<div class="judge" style="margin:10px 0;padding:10px 12px;border:1px solid var(--line-soft);border-radius:8px;background:var(--bg-soft)">' +
+            '<div style="font-size:11px;font-weight:600;color:var(--dim);margin-bottom:6px">CLEF JUDGE (advisory — tests decide)</div>' +
+            '<div style="font-size:12px">' + esc(checksObj.judge.summary) + '</div></div>';
+        }
+      } catch (e) {}
 
       var dec = ui.decisions[intentId];
       var actionHtml;
@@ -459,7 +479,7 @@
           '<h3 class="intent-title">' + esc(it.title || "untitled") + '</h3>' + statusPill(it.status) +
         '</div>' +
         '<div class="intent-meta">by <span class="agent">' + esc(it.agent || "?") + '</span> · candidate <span class="mono">' + esc(cand.repo || "") + "@" + esc(short(cand.commit)) + "</span></div>" +
-        checksHtml + heldOut + verdictLine + actionHtml +
+        checksHtml + heldOut + verdictLine + judgeHtml + actionHtml +
       "</div>";
     }).join("");
   }
@@ -549,12 +569,91 @@
     $("live-text").textContent = ok ? "live · polling every 3s" : "api unreachable";
     $("api-down").style.display = ok ? "none" : "block";
   }
+  /* ---------- live map ---------- */
+  var MAP_W = 800, MAP_H = 320;
+  function heatColor(h) {
+    if (h >= 2) return "#dd5f5f";  // red — high
+    if (h === 1) return "#e5a13c"; // amber — medium
+    return "#646c7a";              // grey — low
+  }
+  function renderMap(intents) {
+    var svg = document.getElementById("map-svg");
+    var empty = document.getElementById("map-empty");
+    if (!svg) return;
+    // Filter to active (not decided) intents for the map
+    var active = (intents || []).filter(function (it) {
+      return ["declared", "forked", "submitted", "evaluated"].indexOf(it.status) >= 0;
+    });
+    if (!active.length) {
+      svg.innerHTML = "";
+      if (empty) empty.style.display = "flex";
+      return;
+    }
+    if (empty) empty.style.display = "none";
+    var W = svg.clientWidth || 800, H = MAP_H;
+    svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+    var n = active.length;
+    var cx = W / 2, cy = H / 2;
+    var R = Math.min(W, H) * 0.32;
+    // Position nodes in a circle (or center if single)
+    var pos = active.map(function (_, i) {
+      if (n === 1) return { x: cx, y: cy };
+      var a = (2 * Math.PI * i) / n - Math.PI / 2;
+      return { x: cx + R * Math.cos(a) * (W > 500 ? 1.6 : 1), y: cy + R * Math.sin(a) };
+    });
+    var html = "";
+    // Draw overlap links first (behind nodes)
+    for (var i = 0; i < n; i++) {
+      for (var j = i + 1; j < n; j++) {
+        var pi = active[i], pj = active[j];
+        try {
+          var ppi = JSON.parse(pi.paths || "[]"), ppj = JSON.parse(pj.paths || "[]");
+          var overlap = ppi.some(function (a) {
+            return ppj.some(function (b) { return a === b || a.indexOf(b) === 0 || b.indexOf(a) === 0; });
+          });
+          if (overlap) {
+            var mx = (pos[i].x + pos[j].x) / 2, my = (pos[i].y + pos[j].y) / 2 - 20;
+            html += '<path d="M' + pos[i].x + ',' + pos[i].y + ' Q' + mx + ',' + my + ' ' + pos[j].x + ',' + pos[j].y + '" stroke="#dd5f5f" stroke-width="1.5" fill="none" stroke-dasharray="5,4" opacity="0.6"/>';
+          }
+        } catch (e) {}
+      }
+    }
+    // Draw nodes
+    active.forEach(function (it, i) {
+      var p = pos[i];
+      var heat = it.heat || 0;
+      var hc = heatColor(heat);
+      var nw = 180, nh = 64;
+      var x = p.x - nw / 2, y = p.y - nh / 2;
+      // Heat halo
+      html += '<rect x="' + (x - 8) + '" y="' + (y - 8) + '" width="' + (nw + 16) + '" height="' + (nh + 16) + '" rx="14" fill="none" stroke="' + hc + '" stroke-width="' + (heat >= 2 ? 3 : 2) + '" opacity="' + (heat > 0 ? 0.8 : 0.3) + '"/>';
+      // Node body
+      html += '<rect x="' + x + '" y="' + y + '" width="' + nw + '" height="' + nh + '" rx="10" fill="#1a1e25" stroke="#262c37" stroke-width="1"/>';
+      // Agent dot
+      var dotColors = ["#6aa8e0", "#5fb98a", "#e5a13c", "#dd5f5f", "#b48ae0"];
+      var dc = dotColors[i % dotColors.length];
+      html += '<circle cx="' + (x + 18) + '" cy="' + (y + 20) + '" r="7" fill="' + dc + '"/>';
+      // Title
+      var title = (it.title || "untitled").replace(/&/g, "&amp;").replace(/</g, "&lt;");
+      if (title.length > 22) title = title.slice(0, 20) + "…";
+      html += '<text x="' + (x + 32) + '" y="' + (y + 24) + '" fill="#e9ebf1" font-size="12" font-weight="600" font-family="sans-serif">' + title + '</text>';
+      // Agent + status
+      var agent = (it.agent || "?").replace(/&/g, "&amp;").replace(/</g, "&lt;");
+      html += '<text x="' + (x + 14) + '" y="' + (y + 44) + '" fill="#9aa2b0" font-size="11" font-family="sans-serif">' + agent + ' · ' + (it.status || "") + '</text>';
+      // Heat badge
+      html += '<circle cx="' + (x + nw - 18) + '" cy="' + (y + 18) + '" r="10" fill="' + hc + '" opacity="0.2"/>';
+      html += '<text x="' + (x + nw - 18) + '" y="' + (y + 22) + '" fill="' + hc + '" font-size="11" font-weight="700" text-anchor="middle" font-family="sans-serif">' + heat + '</text>';
+    });
+    svg.innerHTML = html;
+  }
+
   function poll() {
     Promise.all([api("/api/intents"), api("/api/cards"), api("/api/ledger")]).then(function (rs) {
       var okAll = rs.every(function (r) { return r.ok; });
       setLive(okAll);
       if (!okAll) return;
       renderIntents(rs[0].data);
+      renderMap(rs[0].data);
       renderCards(rs[1].data);
       renderLedger(rs[2].data);
       renderPromotions(rs[2].data);

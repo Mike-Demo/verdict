@@ -2,6 +2,7 @@
 // context — the Sandbox binding works here; it does not inside Workflows).
 import { getSandbox } from '@cloudflare/sandbox';
 import { Env, ledger, now, uid } from './db';
+import { judgeCandidate } from './judge';
 
 export interface EvalParams {
 	candidate_id: string;
@@ -99,6 +100,29 @@ export async function runEvaluation(env: Env, params: EvalParams) {
 	};
 	const pass =
 		checks.commitFound && checks.hasPackageJson && checks.installOk && checks.visibleTestsPass && checks.heldOutTestsPass === true;
+
+	// Advisory judge (Clef): only runs if deterministic gates passed.
+	// Never gates — just adds quality signal to the decision card.
+	let judgeResult = null;
+	if (pass) {
+		try {
+			// Read the candidate's implementation from the sandbox
+			const codeRead = await sandbox.exec(`cat /workspace/cand/src/store.js 2>&1 | head -c 8000`);
+			if (codeRead.exitCode === 0 && codeRead.stdout.length > 100) {
+				// Get the task description from the intent
+				const intent = await env.DB.prepare(
+					`SELECT title, description FROM intents WHERE id = (SELECT intent_id FROM candidates WHERE id = ?)`,
+				).bind(candidate_id).first() as any;
+				const taskDesc = intent ? `${intent.title}: ${intent.description}` : 'Implement the task';
+				judgeResult = await judgeCandidate(env, codeRead.stdout, taskDesc);
+			}
+		} catch (e: any) {
+			console.error('Judge step failed:', e?.message ?? e);
+		}
+	}
+	if (judgeResult) {
+		(checks as any).judge = judgeResult;
+	}
 
 	const summary = [
 		`commit ${commit.slice(0, 8)} found`,
