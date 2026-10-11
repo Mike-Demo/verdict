@@ -19,6 +19,11 @@ async function dispose(_h: any) {
 export async function runEvaluation(env: Env, params: EvalParams) {
 	const { candidate_id, repo, commit } = params;
 
+	// V1 defense-in-depth: validate commit SHA format (api.ts also validates)
+	if (!/^[0-9a-f]{7,40}$/i.test(commit)) {
+		throw new Error('invalid commit sha format');
+	}
+
 	// Gate 1: static checks via the Artifacts binding (fast, deterministic).
 	const r: any = await env.ARTIFACTS.get(repo);
 	let staticChecks: any;
@@ -219,11 +224,12 @@ export async function runEvaluation(env: Env, params: EvalParams) {
 	].join(' · ');
 
 	await env.DB.prepare(
-		`INSERT INTO evaluations (id, candidate_id, checks, pass, held_out_pass, summary, cost_usd, cost_estimated, evaluated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO evaluations (id, candidate_id, commit_sha, checks, pass, held_out_pass, summary, cost_usd, cost_estimated, evaluated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	)
 		.bind(
 			uid('eval'),
 			candidate_id,
+			commit,
 			JSON.stringify(checks),
 			pass ? 1 : 0,
 			checks.heldOutTestsPass == null ? null : checks.heldOutTestsPass ? 1 : 0,

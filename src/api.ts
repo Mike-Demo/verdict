@@ -114,6 +114,10 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 		if (!intent) return json({ error: 'intent not found' }, 404);
 		const body = (await req.json()) as { commit: string };
 		if (!body.commit) return json({ error: 'commit sha required' }, 400);
+		// V1 fix: validate commit SHA format to prevent shell injection
+		if (!/^[0-9a-f]{7,40}$/i.test(body.commit)) {
+			return json({ error: 'invalid commit sha format' }, 400);
+		}
 		const candidate: any = await env.DB.prepare(`SELECT * FROM candidates WHERE intent_id = ?`).bind(id).first();
 		if (!candidate) return json({ error: 'no fork provisioned for this intent' }, 409);
 		await env.DB.prepare(`UPDATE candidates SET commit_sha = ?, submitted_at = ? WHERE id = ?`)
@@ -128,9 +132,9 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 			const evalParams = { candidate_id: candidate.id, repo: candidate.repo, ref: 'main', commit: body.commit };
 			ctx.waitUntil((async () => {
 				try {
-					// Dedup check
+					// Dedup check: skip if this commit was already evaluated (V4 fix)
 					const existing: any = await env.DB.prepare(
-						`SELECT e.id FROM evaluations e JOIN candidates c ON c.id = e.candidate_id WHERE c.id = ? AND c.commit_sha = ? LIMIT 1`
+						`SELECT id FROM evaluations WHERE candidate_id = ? AND commit_sha = ? LIMIT 1`
 					).bind(candidate.id, body.commit).first();
 					if (!existing) {
 						await runEvaluation(env, evalParams);
@@ -161,13 +165,23 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 			 WHERE i.status IN ('submitted','evaluated')
 			 ORDER BY i.created_at ASC`,
 		).all();
-		const cards = (results ?? []).map((r: any) => ({
-			intent: { id: r.id, title: r.title, description: r.description, agent: r.agent, paths: parsePaths(r.paths), status: r.status },
-			candidate: r.candidate_id ? { id: r.candidate_id, repo: r.candidate_repo, commit: r.commit_sha } : null,
-			evaluation: r.eval_id
-				? { checks: JSON.parse(r.checks), pass: !!r.pass, held_out_pass: r.held_out_pass == null ? null : !!r.held_out_pass, summary: r.summary, evaluated_at: r.evaluated_at, cost_usd: r.cost_usd, cost_estimated: !!r.cost_estimated }
-				: null,
-		}));
+		const cards = (results ?? []).map((r: any) => {
+			// V3 fix: strip raw test output from public responses (held-out test names/content must not leak)
+			let checks: any = null;
+			if (r.checks) {
+				try {
+					checks = JSON.parse(r.checks);
+					delete checks.testOutput; // Remove raw sandbox output containing held-out details
+				} catch {}
+			}
+			return {
+				intent: { id: r.id, title: r.title, description: r.description, agent: r.agent, paths: parsePaths(r.paths), status: r.status },
+				candidate: r.candidate_id ? { id: r.candidate_id, repo: r.candidate_repo, commit: r.commit_sha } : null,
+				evaluation: r.eval_id
+					? { checks, pass: !!r.pass, held_out_pass: r.held_out_pass == null ? null : !!r.held_out_pass, summary: r.summary, evaluated_at: r.evaluated_at, cost_usd: r.cost_usd, cost_estimated: !!r.cost_estimated }
+					: null,
+			};
+		});
 		return json(cards);
 	}
 

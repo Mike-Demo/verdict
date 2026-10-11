@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS candidates (
 CREATE TABLE IF NOT EXISTS evaluations (
   id TEXT PRIMARY KEY,
   candidate_id TEXT NOT NULL REFERENCES candidates(id),
+  commit_sha TEXT,               -- commit evaluated (for dedup)
   checks TEXT NOT NULL,          -- JSON: named deterministic checks
   pass INTEGER NOT NULL,         -- 0/1: all gates passed
   held_out_pass INTEGER,         -- 0/1/null
@@ -32,6 +33,7 @@ CREATE TABLE IF NOT EXISTS evaluations (
   evaluated_at INTEGER NOT NULL,
   FOREIGN KEY (candidate_id) REFERENCES candidates(id)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_evaluations_candidate_commit ON evaluations(candidate_id, commit_sha);
 
 CREATE TABLE IF NOT EXISTS decisions (
   id TEXT PRIMARY KEY,

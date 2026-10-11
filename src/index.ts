@@ -19,11 +19,11 @@ export default {
 			if (new URL(req.url).searchParams.get('noop') === '1') {
 				return Response.json({ ok: true, noop: true, params });
 			}
-			// Dedup: skip if an evaluation already exists for this candidate+commit
+			// Dedup: skip if an evaluation already exists for this candidate+commit (V4 fix)
 			// (prevents double-eval from waitUntil + queue consumer both firing).
 			if (params.candidate_id && params.commit) {
 				const existing: any = await env.DB.prepare(
-					`SELECT e.id FROM evaluations e JOIN candidates c ON c.id = e.candidate_id WHERE c.id = ? AND c.commit_sha = ? LIMIT 1`
+					`SELECT id FROM evaluations WHERE candidate_id = ? AND commit_sha = ? LIMIT 1`
 				).bind(params.candidate_id, params.commit).first();
 				if (existing) {
 					return Response.json({ ok: true, deduped: true, evaluation_id: existing.id });
