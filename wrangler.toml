@@ -9,7 +9,7 @@ directory = "./public"
 BASE_REPO = "sample"
 NAMESPACE = "verdict-prototype"
 # Replace with your Artifacts host: <account-id>.artifacts.cloudflare.net
-ACCOUNT_HOST = "827e5ee14288e20217417d7e2463d88d.artifacts.cloudflare.net"
+ACCOUNT_HOST = "YOUR_ACCOUNT_ID.artifacts.cloudflare.net"
 
 [ai]
 binding = "AI"
