@@ -1,5 +1,6 @@
 // Verdict API: intents, forks, decision cards, merge sequencer, ledger, undo.
 import { Env, ledger, now, uid, getIntent, activeIntents, heatFor, parsePaths } from './db';
+import { runEvaluation } from './evaluate';
 
 const json = (data: unknown, status = 200) =>
 	new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } });
@@ -9,7 +10,7 @@ async function disposeAll(_handles: any[]) {
 	// crash the isolate with an uncatchable 1101. Handles are GC'd.
 }
 
-export async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
+export async function handleApi(req: Request, env: Env, url: URL, ctx?: ExecutionContext): Promise<Response> {
 	const path = url.pathname;
 	const method = req.method;
 
@@ -120,6 +121,28 @@ export async function handleApi(req: Request, env: Env, url: URL): Promise<Respo
 			.run();
 		await env.DB.prepare(`UPDATE intents SET status = 'submitted' WHERE id = ?`).bind(id).run();
 		await env.EVAL_QUEUE.send({ candidate_id: candidate.id, repo: candidate.repo, ref: 'main', commit: body.commit });
+		// Workaround: queue consumer doesn't fire (platform issue). Run eval directly via waitUntil.
+		// waitUntil keeps the fetch context alive, so the Sandbox binding works.
+		// The queue remains as backup; runEvaluation dedupes via the eval endpoint.
+		if (ctx) {
+			const evalParams = { candidate_id: candidate.id, repo: candidate.repo, ref: 'main', commit: body.commit };
+			ctx.waitUntil((async () => {
+				try {
+					// Dedup check
+					const existing: any = await env.DB.prepare(
+						`SELECT e.id FROM evaluations e JOIN candidates c ON c.id = e.candidate_id WHERE c.id = ? AND c.commit_sha = ? LIMIT 1`
+					).bind(candidate.id, body.commit).first();
+					if (!existing) {
+						await runEvaluation(env, evalParams);
+					}
+				} catch (e) {
+					// Log to ledger on failure
+					try {
+						await ledger(env, 'evaluation.failed', candidate.id, { error: String(e).slice(0, 200) });
+					} catch {}
+				}
+			})());
+		}
 		await ledger(env, 'candidate.submitted', candidate.id, { intent_id: id, commit: body.commit });
 		return json({ queued: true, candidate_id: candidate.id });
 	}

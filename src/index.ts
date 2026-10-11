@@ -8,7 +8,7 @@ import { getSandbox } from '@cloudflare/sandbox';
 export { Sandbox } from '@cloudflare/sandbox';
 
 export default {
-	async fetch(req: Request, env: Env): Promise<Response> {
+	async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
 		const url = new URL(req.url);
 		// because the Sandbox binding only initializes in fetch context.
 		if (url.pathname === '/api/internal/eval' && req.method === 'POST') {
@@ -19,6 +19,16 @@ export default {
 			if (new URL(req.url).searchParams.get('noop') === '1') {
 				return Response.json({ ok: true, noop: true, params });
 			}
+			// Dedup: skip if an evaluation already exists for this candidate+commit
+			// (prevents double-eval from waitUntil + queue consumer both firing).
+			if (params.candidate_id && params.commit) {
+				const existing: any = await env.DB.prepare(
+					`SELECT e.id FROM evaluations e JOIN candidates c ON c.id = e.candidate_id WHERE c.id = ? AND c.commit_sha = ? LIMIT 1`
+				).bind(params.candidate_id, params.commit).first();
+				if (existing) {
+					return Response.json({ ok: true, deduped: true, evaluation_id: existing.id });
+				}
+			}
 			try {
 				const result = await runEvaluation(env, params);
 				return Response.json({ ok: true, result });
@@ -27,7 +37,7 @@ export default {
 			}
 		}
 		if (url.pathname.startsWith('/api/')) {
-			return handleApi(req, env, url);
+			return handleApi(req, env, url, ctx);
 		}
 		// UI is served as static assets; fall through to assets binding in production.
 		// In the prototype the single index.html is inlined via [site] — see wrangler.toml.
