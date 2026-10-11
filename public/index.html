@@ -285,6 +285,25 @@
       <div id="cards-list"></div>
     </section>
 
+    <section class="block" id="sec-scrubber">
+      <div class="block-head">
+        <h2 class="sec-title">Time scrubber</h2>
+        <span class="sec-hint">replay what happened — including the paths not taken</span>
+      </div>
+      <div class="card" style="padding: 18px 22px;">
+        <div id="scrubber-timeline" style="position:relative;height:64px;background:var(--bg1);border-radius:8px;margin-bottom:12px;overflow:hidden;cursor:pointer;">
+          <div id="scrubber-track" style="position:absolute;top:30px;left:16px;right:16px;height:4px;background:var(--line);border-radius:2px;"></div>
+          <div id="scrubber-events" style="position:absolute;top:0;left:16px;right:16px;height:64px;"></div>
+          <div id="scrubber-playhead" style="position:absolute;top:22px;width:2px;height:20px;background:var(--amber);display:none;"></div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button class="btn small" id="scrubber-play">▶ Replay</button>
+          <span id="scrubber-label" style="font-size:12px;color:var(--dim);">Drag the timeline or press Replay to walk through events.</span>
+        </div>
+        <div id="scrubber-detail" style="margin-top:12px;font-size:13px;color:var(--mut);min-height:40px;"></div>
+      </div>
+    </section>
+
     <section class="block" id="sec-ledger">
       <div class="block-head"><h2 class="sec-title">Ledger</h2><span class="sec-hint">append-only · newest first</span></div>
       <div class="card" style="padding: 6px 22px;" id="ledger-list"></div>
@@ -300,6 +319,16 @@
   <footer class="foot">
     Verdict prototype UI — single file, no build step. Polls <code>/api/intents</code>, <code>/api/cards</code>, <code>/api/ledger</code> every 3 s.
   </footer>
+
+  <!-- Provenance Drawer -->
+  <div id="prov-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:99;"></div>
+  <div id="prov-drawer" style="display:none;position:fixed;top:0;right:0;bottom:0;width:min(420px,90vw);background:var(--bg1);border-left:1px solid var(--line);z-index:100;overflow-y:auto;padding:24px;box-shadow:-8px 0 24px rgba(0,0,0,0.3);">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3 style="margin:0;font-size:16px;">Provenance</h3>
+      <button class="btn small ghost" id="prov-close">✕ Close</button>
+    </div>
+    <div id="prov-content"></div>
+  </div>
 </div>
 <script>
 (function () {
@@ -478,11 +507,39 @@
         '<div class="intent-top">' +
           '<h3 class="intent-title">' + esc(it.title || "untitled") + '</h3>' + statusPill(it.status) +
         '</div>' +
-        '<div class="intent-meta">by <span class="agent">' + esc(it.agent || "?") + '</span> · candidate <span class="mono">' + esc(cand.repo || "") + "@" + esc(short(cand.commit)) + "</span></div>" +
+        '<div class="intent-meta">by <span class="agent">' + esc(it.agent || "?") + '</span> · candidate <span class="mono">' + esc(cand.repo || "") + "@" + esc(short(cand.commit)) + "</span>" +
+        ' <button class="btn small ghost" style="margin-left:8px;" onclick="openProvenanceFor(\'' + esc(intentId) + '\')">Provenance</button></div>' +
         checksHtml + heldOut + verdictLine + judgeHtml + actionHtml +
       "</div>";
     }).join("");
   }
+
+  // Provenance for an intent (finds related ledger entries)
+  window.openProvenanceFor = function (intentId) {
+    var overlay = document.getElementById("prov-overlay");
+    var drawer = document.getElementById("prov-drawer");
+    var content = document.getElementById("prov-content");
+    if (!overlay || !drawer || !content) return;
+    var related = scrubberData.filter(function (e) {
+      var p = e.payload || {};
+      return e.ref_id === intentId || p.intent_id === intentId || (p.title && e.kind === "intent.declared");
+    });
+    var html = '<div style="margin-bottom:16px;"><div style="font-size:14px;font-weight:600;">Intent: ' + esc(intentId.slice(0, 16)) + '…</div>' +
+      '<div style="font-size:12px;color:var(--dim);margin-top:4px;">' + related.length + ' related events</div></div>';
+    if (!related.length) {
+      html += '<p style="color:var(--dim);font-size:13px;">No ledger entries found for this intent yet.</p>';
+    } else {
+      html += related.map(function (e) {
+        var d = new Date(e.at * 1000).toLocaleTimeString();
+        return '<div style="padding:10px;border:1px solid var(--line);border-radius:8px;margin-bottom:8px;cursor:pointer;" onclick="openProvenance(\'' + esc(e.kind) + '\',' + e.seq + ')">' +
+          '<div style="font-size:11px;color:var(--dim);">' + esc(d) + ' · ' + esc(e.kind) + '</div>' +
+          '<div style="font-size:12px;margin-top:4px;">' + esc(JSON.stringify(e.payload || {}).slice(0, 100)) + '…</div></div>';
+      }).join("");
+    }
+    content.innerHTML = html;
+    overlay.style.display = "block";
+    drawer.style.display = "block";
+  };
 
   /* ---------- ledger ---------- */
   function ledgerLine(e) {
@@ -647,6 +704,133 @@
     svg.innerHTML = html;
   }
 
+  /* ---------- time scrubber ---------- */
+  var scrubberData = [];
+  var scrubberPlaying = false;
+  var scrubberTimer = null;
+  function renderScrubber(ledger) {
+    scrubberData = (ledger || []).slice().sort(function (a, b) { return (a.at || 0) - (b.at || 0); });
+    var container = document.getElementById("scrubber-events");
+    if (!container || !scrubberData.length) return;
+    var minT = scrubberData[0].at, maxT = scrubberData[scrubberData.length - 1].at;
+    var span = Math.max(maxT - minT, 1);
+    var kindColors = {
+      "intent.declared": "#6aa8e0", "fork.created": "#5fb98a",
+      "candidate.submitted": "#e5a13c", "evaluation.done": "#b48ae0",
+      "decision.made": "#e5a13c", "promotion.done": "#5fb98a", "undo.done": "#dd5f5f"
+    };
+    container.innerHTML = scrubberData.map(function (e, i) {
+      var pct = ((e.at - minT) / span * 100).toFixed(1);
+      var color = kindColors[e.kind] || "#646c7a";
+      var label = (e.kind || "").replace(".", " ");
+      return '<div class="scrub-dot" data-idx="' + i + '" title="' + esc(label) + '" ' +
+        'style="position:absolute;left:' + pct + '%;top:26px;width:12px;height:12px;border-radius:50%;' +
+        'background:' + color + ';border:2px solid var(--bg1);cursor:pointer;transform:translateX(-50%);"></div>';
+    }).join("");
+    // Click a dot to see details
+    container.querySelectorAll(".scrub-dot").forEach(function (dot) {
+      dot.addEventListener("click", function () {
+        showScrubberEvent(parseInt(dot.getAttribute("data-idx")));
+      });
+    });
+  }
+  function showScrubberEvent(idx) {
+    var e = scrubberData[idx];
+    if (!e) return;
+    var detail = document.getElementById("scrubber-detail");
+    var playhead = document.getElementById("scrubber-playhead");
+    if (!detail) return;
+    var d = new Date(e.at * 1000);
+    var timeStr = d.toLocaleTimeString();
+    var p = e.payload || {};
+    var desc = "";
+    switch (e.kind) {
+      case "intent.declared": desc = 'Intent declared: "' + esc(p.title || "") + '" by ' + esc(p.agent || "?"); break;
+      case "fork.created": desc = "Fork created: " + esc(p.repo || ""); break;
+      case "candidate.submitted": desc = "Candidate submitted: " + esc((p.commit || "").slice(0, 8)); break;
+      case "evaluation.done": desc = "Evaluation: " + (p.pass ? "PASS" : "FAIL") + " — " + esc(p.summary || ""); break;
+      case "decision.made": desc = "Decision: " + esc(p.rationale || "no rationale").slice(0, 120); break;
+      case "promotion.done": desc = "Promoted: " + esc((p.prev_head || "").slice(0, 8)) + " → " + esc((p.new_head || "").slice(0, 8)); break;
+      case "undo.done": desc = "Undo: restored " + esc((p.restored || "").slice(0, 8)); break;
+      default: desc = e.kind;
+    }
+    detail.innerHTML = '<strong style="color:var(--amber);">' + esc(timeStr) + '</strong> · ' + desc +
+      ' <button class="btn small ghost" style="margin-left:8px;" onclick="openProvenance(\'' + esc(e.kind) + '\',' + e.seq + ')">Provenance →</button>';
+    // Move playhead
+    if (playhead && scrubberData.length > 1) {
+      var minT = scrubberData[0].at, maxT = scrubberData[scrubberData.length - 1].at;
+      var pct = ((e.at - minT) / Math.max(maxT - minT, 1) * 100);
+      playhead.style.display = "block";
+      playhead.style.left = "calc(16px + " + pct + "% * 0.94)";
+    }
+    var label = document.getElementById("scrubber-label");
+    if (label) label.textContent = "Event " + (idx + 1) + " of " + scrubberData.length + " — " + e.kind;
+  }
+  document.addEventListener("click", function (ev) {
+    if (ev.target && ev.target.id === "scrubber-play") {
+      if (scrubberPlaying) {
+        clearInterval(scrubberTimer); scrubberPlaying = false;
+        ev.target.textContent = "▶ Replay";
+      } else if (scrubberData.length) {
+        scrubberPlaying = true; ev.target.textContent = "⏸ Pause";
+        var i = 0;
+        showScrubberEvent(0);
+        scrubberTimer = setInterval(function () {
+          i++;
+          if (i >= scrubberData.length) { clearInterval(scrubberTimer); scrubberPlaying = false; ev.target.textContent = "▶ Replay"; return; }
+          showScrubberEvent(i);
+        }, 1500);
+      }
+    }
+  });
+
+  /* ---------- provenance drawer ---------- */
+  window.openProvenance = function (kind, seq) {
+    var overlay = document.getElementById("prov-overlay");
+    var drawer = document.getElementById("prov-drawer");
+    var content = document.getElementById("prov-content");
+    if (!overlay || !drawer || !content) return;
+    // Find the ledger entry
+    var entry = scrubberData.find(function (e) { return e.seq === seq; });
+    if (!entry) {
+      // Try to find in current ledger data
+      content.innerHTML = '<p style="color:var(--dim);">Loading...</p>';
+    } else {
+      var p = entry.payload || {};
+      var d = new Date(entry.at * 1000);
+      var html = '<div style="margin-bottom:16px;">' +
+        '<div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">' + esc(entry.kind) + '</div>' +
+        '<div style="font-size:12px;color:var(--mut);">' + d.toLocaleString() + ' · seq #' + entry.seq + '</div></div>';
+      html += '<div style="background:var(--bg0);border:1px solid var(--line);border-radius:8px;padding:14px;margin-bottom:12px;">';
+      html += '<div style="font-size:11px;color:var(--dim);margin-bottom:8px;">EVENT PAYLOAD</div>';
+      html += '<pre style="margin:0;font-size:11px;color:var(--txt);white-space:pre-wrap;word-break:break-word;font-family:var(--mono);">' + esc(JSON.stringify(p, null, 2)) + '</pre></div>';
+      if (entry.ref_id) {
+        html += '<div style="font-size:12px;color:var(--mut);">Ref: <span class="mono">' + esc(entry.ref_id) + '</span></div>';
+      }
+      // Add context-specific info
+      if (entry.kind === "evaluation.done") {
+        html += '<div style="margin-top:12px;padding:12px;background:var(--bg0);border-radius:8px;border:1px solid var(--line);">' +
+          '<div style="font-size:11px;color:var(--dim);margin-bottom:6px;">EVIDENCE</div>' +
+          '<div style="font-size:13px;">Result: <strong style="color:' + (p.pass ? "var(--green)" : "var(--red)") + ';">' + (p.pass ? "PASS" : "FAIL") + '</strong></div>' +
+          '<div style="font-size:12px;color:var(--mut);margin-top:4px;">' + esc(p.summary || "") + '</div></div>';
+      }
+      if (entry.kind === "decision.made" && p.rationale) {
+        html += '<div style="margin-top:12px;padding:12px;background:var(--bg0);border-radius:8px;border:1px solid var(--line);">' +
+          '<div style="font-size:11px;color:var(--dim);margin-bottom:6px;">HUMAN RATIONALE</div>' +
+          '<div style="font-size:13px;font-style:italic;">"' + esc(p.rationale) + '"</div></div>';
+      }
+      content.innerHTML = html;
+    }
+    overlay.style.display = "block";
+    drawer.style.display = "block";
+  };
+  document.addEventListener("click", function (ev) {
+    if (ev.target && (ev.target.id === "prov-close" || ev.target.id === "prov-overlay")) {
+      document.getElementById("prov-overlay").style.display = "none";
+      document.getElementById("prov-drawer").style.display = "none";
+    }
+  });
+
   function poll() {
     Promise.all([api("/api/intents"), api("/api/cards"), api("/api/ledger")]).then(function (rs) {
       var okAll = rs.every(function (r) { return r.ok; });
@@ -657,6 +841,7 @@
       renderCards(rs[1].data);
       renderLedger(rs[2].data);
       renderPromotions(rs[2].data);
+      renderScrubber(rs[2].data);
     }).catch(function () { setLive(false); });
   }
 

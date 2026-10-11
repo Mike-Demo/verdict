@@ -106,15 +106,31 @@ export async function runEvaluation(env: Env, params: EvalParams) {
 	let judgeResult = null;
 	if (pass) {
 		try {
-			// Read the candidate's implementation from the sandbox
-			const codeRead = await sandbox.exec(`cat /workspace/cand/src/store.js 2>&1 | head -c 8000`);
-			if (codeRead.exitCode === 0 && codeRead.stdout.length > 100) {
+			// Read the candidate's implementation via Artifacts binding (not sandbox).
+			let code = '';
+			try {
+				const repoHandle: any = await env.ARTIFACTS.get(repo);
+				try {
+					const blob = await repoHandle.readFile({ ref: commit, path: 'src/store.js' });
+					if (blob) {
+						const text = await blob.text();
+						if (text && text.length > 100) code = text.slice(0, 6000);
+					}
+				} finally {
+					// Do not call Symbol.asyncDispose — it crashes the isolate (see AGENTS.md)
+				}
+			} catch (e: any) {
+				console.error('[judge] Artifacts readFile failed:', e?.message ?? e);
+			}
+			if (code.length > 100) {
 				// Get the task description from the intent
 				const intent = await env.DB.prepare(
 					`SELECT title, description FROM intents WHERE id = (SELECT intent_id FROM candidates WHERE id = ?)`,
 				).bind(candidate_id).first() as any;
 				const taskDesc = intent ? `${intent.title}: ${intent.description}` : 'Implement the task';
-				judgeResult = await judgeCandidate(env, codeRead.stdout, taskDesc);
+				judgeResult = await judgeCandidate(env, code, taskDesc);
+			} else {
+				console.error('[judge] Could not read candidate code via Artifacts');
 			}
 		} catch (e: any) {
 			console.error('Judge step failed:', e?.message ?? e);

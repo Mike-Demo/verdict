@@ -29,6 +29,7 @@ export async function judgeCandidate(
 		// Clef takes a state description + typed questions, returns probabilities.
 		// Using clef-flash for speed (38ms median) and cost ($0.038/million tokens).
 		// NOTE: the `model` field must match the model ID.
+		console.log('[judge] Calling Clef...');
 		const response: any = await env.AI.run('@cf/cloudflare/clef-flash', {
 			model: 'clef-flash',
 			state: `Task: ${taskDescription}\n\nCandidate implementation:\n\`\`\`js\n${code.slice(0, 6000)}\n\`\`\``,
