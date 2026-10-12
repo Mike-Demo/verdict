@@ -55,8 +55,11 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 		if ((result.meta?.changes ?? 0) === 0) {
 			return json({ error: 'intent queue is full (5). Resolve or withdraw an intent first.' }, 409);
 		}
-			.run();
-		const heat = heatFor(body.paths, active.map((a: any) => ({ paths: parsePaths(a.paths) })));
+		// Heat: query other active intents (excluding the one just inserted)
+		const { results: otherActive } = await env.DB.prepare(
+			`SELECT * FROM intents WHERE status IN ('declared','forked','submitted') AND id != ?`
+		).bind(id).all();
+		const heat = heatFor(body.paths, (otherActive ?? []).map((a: any) => ({ paths: parsePaths(a.paths) })));
 		await ledger(env, 'intent.declared', id, { title: body.title, agent: body.agent, paths: body.paths, heat });
 		return json({ id, title: body.title, agent: body.agent, paths: body.paths, heat, status: 'declared' });
 	}
