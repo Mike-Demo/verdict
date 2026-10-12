@@ -43,15 +43,18 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 		if (!body.title || !Array.isArray(body.paths) || !body.agent) {
 			return json({ error: 'title, paths[], agent required' }, 400);
 		}
-		const active = await activeIntents(env);
-		if (active.length >= 5) {
-			return json({ error: 'intent queue is full (5). Resolve or withdraw an intent first.' }, 409);
-		}
+		// V10 fix: atomic cap via INSERT...SELECT — no race between check and insert
 		const id = uid('intent');
-		await env.DB.prepare(
-			`INSERT INTO intents (id, title, description, paths, agent, status, created_at) VALUES (?, ?, ?, ?, ?, 'declared', ?)`,
+		const result = await env.DB.prepare(
+			`INSERT INTO intents (id, title, description, paths, agent, status, created_at)
+			 SELECT ?, ?, ?, ?, ?, 'declared', ?
+			 WHERE (SELECT COUNT(*) FROM intents WHERE status IN ('declared','forked','submitted')) < 5`,
 		)
 			.bind(id, body.title, body.description ?? '', JSON.stringify(body.paths), body.agent, now())
+			.run();
+		if ((result.meta?.changes ?? 0) === 0) {
+			return json({ error: 'intent queue is full (5). Resolve or withdraw an intent first.' }, 409);
+		}
 			.run();
 		const heat = heatFor(body.paths, active.map((a: any) => ({ paths: parsePaths(a.paths) })));
 		await ledger(env, 'intent.declared', id, { title: body.title, agent: body.agent, paths: body.paths, heat });
@@ -424,7 +427,8 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 
 	// --- Append-only ledger ---
 	if (method === 'GET' && path === '/api/ledger') {
-		const { results } = await env.DB.prepare(`SELECT seq, kind, ref_id, payload, at FROM ledger ORDER BY seq ASC LIMIT 500`).all();
+		// V17: include prev_hash/hash so external verifiers can check the chain
+		const { results } = await env.DB.prepare(`SELECT seq, kind, ref_id, payload, prev_hash, hash, at FROM ledger ORDER BY seq ASC LIMIT 500`).all();
 		return json((results ?? []).map((r: any) => ({ ...r, payload: JSON.parse(r.payload) })));
 	}
 
