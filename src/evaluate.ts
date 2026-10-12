@@ -60,8 +60,11 @@ export async function runEvaluation(env: Env, params: EvalParams) {
 		await dispose(r2);
 	}
 	const tokenSecret = readToken.split('?expires=')[0];
+	// Copilot follow-up: sanitize token for shell interpolation (defense-in-depth).
+	// Artifacts tokens should be URL-safe, but strip anything unexpected.
+	const safeToken = tokenSecret.replace(/[^A-Za-z0-9\-_.~]/g, '');
 	const remote = `https://${env.ACCOUNT_HOST}/git/${env.NAMESPACE}/${repo}.git`;
-	const authRemote = remote.replace('https://', `https://x:${tokenSecret}@`);
+	const authRemote = remote.replace('https://', `https://x:${safeToken}@`);
 
 	const sandbox = getSandbox(env.SANDBOX, `eval-${candidate_id}-${Date.now().toString(36)}`);
 	const out: any = { clone: null, install: null, visible: null, heldOut: null };
