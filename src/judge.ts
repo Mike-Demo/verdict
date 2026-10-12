@@ -34,7 +34,7 @@ export async function judgeCandidate(
 		console.log('[judge] Calling Clef...');
 		const stripped = code
 			.replace(/\/\*[\s\S]*?\*\//g, '') // block comments
-			.replace(/(^|[^\n:])\/\/[^\n]*/g, '$1'); // line comments (avoid :// in URLs)
+			.replace(/(^|[^\n:])\/\/[^\n]*/gm, '$1'); // line comments (multiline; avoid :// in URLs)
 		const truncated = stripped.length > 6000;
 		const codeForModel = stripped.slice(0, 6000);
 		const response: any = await env.AI.run('@cf/cloudflare/clef-flash', {

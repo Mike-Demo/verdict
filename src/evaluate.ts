@@ -152,13 +152,14 @@ export async function runEvaluation(env: Env, params: EvalParams) {
 	const specCommit = intentRow?.spec_commit ?? null;
 
 	const checks = {
+		// V3 fix (round 2): NEVER store raw test output — held-out test names/content
+		// must not persist in checks or leak via ledger/API. Store only pass/fail booleans.
 		commitFound: !!staticChecks.commitFound,
 		hasPackageJson: !!staticChecks.hasPackageJson,
 		hasTestScript: !!staticChecks.hasTestScript,
 		installOk: !!out.install?.ok,
 		visibleTestsPass: !!out.visible?.ok,
 		heldOutTestsPass: out.heldOut ? !!out.heldOut.ok : null,
-		testOutput: out,
 		changed_files: changedFiles,
 		scope_checked: scopeChecked,
 		scope_creep: scopeCreep,

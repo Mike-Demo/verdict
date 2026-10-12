@@ -29,6 +29,7 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 		/\/api\/intents\/[^/]+\/submit$/.test(path) ||
 		path === '/api/decide' ||
 		path === '/api/undo' ||
+		path === '/api/undo/confirm' ||
 		path === '/api/promotions/confirm'
 	);
 	if (isWrite) {
@@ -74,12 +75,21 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 					.bind((candidate as any).id)
 					.first();
 			}
+			// V3 fix (round 2): strip testOutput from evaluation checks in /api/intents too
+			let safeEvaluation = evaluation;
+			if (evaluation && evaluation.checks) {
+				try {
+					const checks = JSON.parse(evaluation.checks);
+					delete checks.testOutput;
+					safeEvaluation = { ...evaluation, checks: JSON.stringify(checks) };
+				} catch {}
+			}
 			out.push({
 				...intent,
 				paths: parsePaths(intent.paths),
 				heat: heatFor(parsePaths(intent.paths), others.map((a: any) => ({ paths: parsePaths(a.paths) }))),
 				candidate,
-				evaluation,
+				evaluation: safeEvaluation,
 			});
 		}
 		return json(out);
@@ -227,10 +237,11 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 		// The candidate may have modified its own judge.
 		let evalChecks: any = {};
 		try { evalChecks = JSON.parse(evaluation.checks || '{}'); } catch {}
-		if (evalChecks.touched_tests && !body.override_test_touch) {
+		// V16 fix (round 2): check explicitly for true (not truthiness — "false" string would bypass)
+		if (evalChecks.touched_tests && body.override_test_touch !== true) {
 			return json({
 				error: 'candidate touched test paths — human override required',
-				guidance: 'The candidate modified test files. If this was intentional, resubmit with override_test_touch=true.',
+				guidance: 'The candidate modified test files. If this was intentional, resubmit with override_test_touch=true (boolean).',
 				touched_tests: true,
 			}, 409);
 		}
@@ -313,7 +324,20 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 		const body = (await req.json()) as { decision_id: string };
 		const decision: any = await env.DB.prepare(`SELECT * FROM decisions WHERE id = ?`).bind(body.decision_id).first();
 		if (!decision) return json({ error: 'decision not found' }, 404);
+		// N3 fix: prevent double-record (idempotency)
+		const existingPromo: any = await env.DB.prepare(`SELECT id FROM promotions WHERE decision_id = ? LIMIT 1`).bind(decision.id).first();
+		if (existingPromo) {
+			return json({ confirmed: true, promotion_id: existingPromo.id, note: 'already confirmed' });
+		}
 		const candidate: any = await env.DB.prepare(`SELECT * FROM candidates WHERE id = ?`).bind(decision.winner_candidate_id).first();
+		// V5/V14 fix (round 2): confirm must verify main advanced to the EVALUATED commit, not just fork head
+		const evaluation: any = await env.DB.prepare(
+			`SELECT commit_sha FROM evaluations WHERE candidate_id = ? ORDER BY evaluated_at DESC LIMIT 1`
+		).bind(candidate.id).first();
+		const evaluatedCommit = evaluation?.commit_sha;
+		if (!evaluatedCommit) {
+			return json({ error: 'no evaluation found for candidate' }, 409);
+		}
 		let baseRepo: any = null;
 		let forkRepo: any = null;
 		try {
@@ -323,6 +347,16 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 			const forkHead = (await forkRepo.log({ ref: 'main', limit: 1 }))[0]?.hash;
 			if (mainHead !== forkHead) {
 				return json({ confirmed: false, reason: 'main has not advanced to the candidate head', mainHead, forkHead }, 409);
+			}
+			// Must match the evaluated commit — prevents post-eval push attacks
+			if (mainHead !== evaluatedCommit) {
+				return json({
+					confirmed: false,
+					reason: 'main head does not match evaluated commit',
+					guidance: 'The promoted commit differs from what was evaluated. This is a security violation.',
+					main_head: mainHead,
+					evaluated_commit: evaluatedCommit,
+				}, 409);
 			}
 			const prev = JSON.parse((await env.DB.prepare(`SELECT payload FROM ledger WHERE kind = 'decision.made' AND ref_id = ?`).bind(decision.id).first() as any)?.payload ?? '{}');
 			const promotionId = uid('promo');
@@ -348,7 +382,8 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 		try {
 			baseRepo = await env.ARTIFACTS.get(env.BASE_REPO);
 			const token = await baseRepo.createToken('write', 300);
-			await env.DB.prepare(`UPDATE promotions SET undone = 1 WHERE id = ?`).bind(promo.id).run();
+			// N4 fix: don't mark undone here — only in /api/undo/confirm after verified restore.
+			// This allows retry if the push fails or token expires.
 			await ledger(env, 'undo.done', promo.id, { prev_head: promo.prev_head, restored_to: promo.prev_head });
 			return json({
 				undone: true,
@@ -365,8 +400,10 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 	// V7 fix: implement /api/undo/confirm (was referenced but missing)
 	if (method === 'POST' && path === '/api/undo/confirm') {
 		const body = (await req.json()) as { promotion_id: string };
+		if (!body.promotion_id) return json({ error: 'promotion_id required' }, 400);
 		const promo: any = await env.DB.prepare(`SELECT * FROM promotions WHERE id = ?`).bind(body.promotion_id).first();
-		if (!promo || !promo.undone) return json({ error: 'promotion not found or not undone' }, 404);
+		if (!promo) return json({ error: 'promotion not found' }, 404);
+		if (promo.undone) return json({ error: 'already undone' }, 409);
 		let baseRepo: any = null;
 		try {
 			baseRepo = await env.ARTIFACTS.get(env.BASE_REPO);
@@ -374,6 +411,8 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 			if (!mainLog.length) return json({ error: 'cannot read main' }, 500);
 			const currentHead = mainLog[0].hash;
 			if (currentHead === promo.prev_head) {
+				// N4 fix: mark undone only here, after verified restore
+				await env.DB.prepare(`UPDATE promotions SET undone = 1 WHERE id = ?`).bind(promo.id).run();
 				await ledger(env, 'undo.confirmed', promo.id, { restored_to: currentHead });
 				return json({ confirmed: true, head: currentHead });
 			}
