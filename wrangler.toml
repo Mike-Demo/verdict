@@ -10,6 +10,8 @@ BASE_REPO = "sample"
 NAMESPACE = "verdict-prototype"
 # Replace with your Artifacts host: <account-id>.artifacts.cloudflare.net
 ACCOUNT_HOST = "YOUR_ACCOUNT_ID.artifacts.cloudflare.net"
+# Copilot audit fix: queue consumer self-fetch URL (no longer hardcoded in code)
+WORKER_URL = "https://verdict.hey-demo-827.workers.dev"
 
 [ai]
 binding = "AI"

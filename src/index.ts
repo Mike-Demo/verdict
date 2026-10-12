@@ -52,7 +52,9 @@ export default {
 				// Self-fetch: the Sandbox binding only initializes in fetch
 				// context, so the consumer delegates the heavy eval to an
 				// internal HTTP endpoint instead of running it inline.
-				const res = await fetch('https://verdict.hey-demo-827.workers.dev/api/internal/eval', {
+				// Copilot audit fix: use env.WORKER_URL instead of hardcoded URL
+				const workerUrl = (env as any).WORKER_URL || 'https://verdict.hey-demo-827.workers.dev';
+				const res = await fetch(`${workerUrl}/api/internal/eval`, {
 					method: 'POST',
 					headers: { 'content-type': 'application/json', 'x-verdict-secret': env.INTERNAL_SECRET },
 					body: JSON.stringify(msg.body),

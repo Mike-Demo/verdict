@@ -16,9 +16,16 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 
 	// V2 fix: require shared secret on all write endpoints.
 	// The UI prompts for it once and stores in sessionStorage.
+	// Copilot audit fix: fail LOUD if INTERNAL_SECRET is not configured (not silent 401)
+	if (!env.INTERNAL_SECRET) {
+		console.error('[verdict] FATAL: INTERNAL_SECRET is not configured');
+	}
 	const requireAuth = () => {
 		const secret = req.headers.get('x-verdict-secret');
-		if (!env.INTERNAL_SECRET || secret !== env.INTERNAL_SECRET) {
+		if (!env.INTERNAL_SECRET) {
+			return json({ error: 'server misconfigured: write secret not set' }, 500);
+		}
+		if (secret !== env.INTERNAL_SECRET) {
 			return json({ error: 'unauthorized: x-verdict-secret required' }, 401);
 		}
 		return null;

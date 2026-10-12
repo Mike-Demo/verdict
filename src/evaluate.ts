@@ -66,8 +66,12 @@ export async function runEvaluation(env: Env, params: EvalParams) {
 	const sandbox = getSandbox(env.SANDBOX, `eval-${candidate_id}-${Date.now().toString(36)}`);
 	const out: any = { clone: null, install: null, visible: null, heldOut: null };
 	try {
+		// Copilot audit fix: defense-in-depth on shell interpolation.
+		// commit is regex-validated (^[0-9a-f]{7,40}$) but we strip shell metachars anyway,
+		// and use -- to separate refs from options.
+		const safeCommit = commit.replace(/[^0-9a-f]/gi, '');
 		const clone = await sandbox.exec(
-			`rm -rf /workspace/cand && git clone ${authRemote} /workspace/cand 2>&1 && cd /workspace/cand && git checkout ${commit} 2>&1 | tail -1`,
+			`rm -rf /workspace/cand && git clone ${authRemote} /workspace/cand 2>&1 && cd /workspace/cand && git checkout -- . 2>&1 && git checkout ${safeCommit} 2>&1 | tail -1`,
 		);
 		out.clone = { ok: clone.exitCode === 0, output: (clone.stdout + clone.stderr).slice(-500) };
 		if (out.clone.ok) {
