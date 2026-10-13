@@ -81,3 +81,6 @@ Agent declares intent → Verdict provisions isolated fork (Artifacts)
 
 ## License
 MIT — see [LICENSE](LICENSE).
+
+## Third-party attribution
+The UI uses four brand icons from [Font Awesome Free](https://github.com/FortAwesome/Font-Awesome) (Copyright Fonticons, Inc.), licensed under [CC BY 4.0](https://fontawesome.com/license/free). The SVG paths are inlined without modification. Brand icons are trademarks of their respective owners and appear only to represent the company, product, or service they refer to.
