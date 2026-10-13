@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Verdict — Media Kit</title>
+<style>
+  :root {
+    --bg0:#131314; --bg1:#1b1b1c; --bg2:#232324; --bg3:#2b2b2c;
+    --line:#404041; --txt:#f2f2f2; --mut:#a3a3a4; --dim:#767677;
+    --amber:#f48120; --amber-ink:#faad3f;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg0); color:var(--txt); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
+  header { padding:28px 24px 8px; max-width:1080px; margin:0 auto; }
+  .mark { display:flex; align-items:center; gap:10px; }
+  .mark .sq { width:14px; height:14px; background:var(--amber); display:inline-block; }
+  .mark h1 { font-size:22px; letter-spacing:.14em; margin:0; font-weight:800; }
+  .mark h1 span { color:var(--amber); }
+  header p { color:var(--mut); margin:10px 0 0; font-size:15px; }
+  header a.back { color:var(--amber-ink); text-decoration:none; font-size:14px; }
+  main { max-width:1080px; margin:0 auto; padding:16px 24px 48px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:20px; }
+  .card { background:var(--bg1); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+  .card img { width:100%; display:block; aspect-ratio:16/9; object-fit:cover; background:var(--bg2); }
+  .card.portrait img { aspect-ratio:9/16; max-height:420px; object-fit:cover; }
+  .card .body { padding:14px 16px 16px; }
+  .card h3 { margin:0 0 4px; font-size:16px; }
+  .card .meta { color:var(--dim); font-size:13px; margin:0 0 12px; }
+  .actions { display:flex; gap:10px; }
+  button.watch, a.dl {
+    font:inherit; font-size:14px; font-weight:700; cursor:pointer; border-radius:8px;
+    padding:9px 16px; text-decoration:none; display:inline-block;
+  }
+  button.watch { background:var(--amber); color:#131314; border:none; }
+  button.watch:hover { background:var(--amber-ink); }
+  a.dl { background:var(--bg3); color:var(--txt); border:1px solid var(--line); }
+  a.dl:hover { border-color:var(--amber); color:var(--amber-ink); }
+  .note { color:var(--dim); font-size:13px; margin-top:26px; }
+  /* modal */
+  .overlay { position:fixed; inset:0; background:rgba(0,0,0,.86); display:none; align-items:center; justify-content:center; z-index:50; padding:20px; }
+  .overlay.open { display:flex; }
+  .modal { width:100%; max-width:960px; }
+  .modal.portrait { max-width:400px; }
+  .modal video { width:100%; max-height:82vh; display:block; background:#000; border-radius:10px; }
+  .modal .bar { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+  .modal .bar span { font-weight:700; font-size:15px; }
+  .modal .bar button { background:var(--bg3); color:var(--txt); border:1px solid var(--line); border-radius:8px; font:inherit; font-size:14px; padding:6px 12px; cursor:pointer; }
+</style>
+</head>
+<body>
+<header>
+  <div class="mark"><span class="sq"></span><h1>VERDICT <span>MEDIA KIT</span></h1></div>
+  <p>The Verdict sizzle — 44 seconds. Watch in the browser, or download the file. <a class="back" href="/">← Back to the live app</a></p>
+</header>
+<main>
+  <div class="grid" id="grid"></div>
+  <p class="note">Files are hosted as assets on the <a href="https://github.com/Mike-Demo/verdict/releases/tag/sizzle-media-v1" style="color:var(--amber-ink)">sizzle-media-v1 release</a> in the public repository. Video icons and UI captures are from the live app.</p>
+</main>
+
+<div class="overlay" id="overlay">
+  <div class="modal" id="modal">
+    <div class="bar"><span id="modal-title"></span><button id="modal-close" type="button">Close ✕</button></div>
+    <video id="modal-video" controls playsinline preload="metadata"></video>
+  </div>
+</div>
+
+<script>
+  var RELEASE = "https://github.com/Mike-Demo/verdict/releases/download/sizzle-media-v1/";
+  var VIDEOS = [
+    { file: "verdict-sizzle-v2-vo.mp4",    title: "Sizzle — August v2 voiceover", meta: "16:9 · 1080p · 44s · with narration", poster: "media-poster-opening.jpg", portrait: false },
+    { file: "verdict-sizzle-v2-novo.mp4",  title: "Sizzle — Music only",          meta: "16:9 · 1080p · 44s · no voiceover",   poster: "media-poster-map.jpg",     portrait: false },
+    { file: "verdict-sizzle-v2-vo-4k.mp4",   title: "Sizzle — Voiceover, 4K",     meta: "16:9 · 3840×2160 · 44s · upscale",  poster: "media-poster-opening.jpg", portrait: false },
+    { file: "verdict-sizzle-v2-novo-4k.mp4", title: "Sizzle — Music only, 4K",    meta: "16:9 · 3840×2160 · 44s · upscale",  poster: "media-poster-map.jpg",     portrait: false }
+  ];
+  var grid = document.getElementById("grid");
+  VIDEOS.forEach(function (v) {
+    var card = document.createElement("div");
+    card.className = "card" + (v.portrait ? " portrait" : "");
+    card.innerHTML =
+      '<img alt="" src="' + v.poster + '">' +
+      '<div class="body"><h3></h3><p class="meta"></p>' +
+      '<div class="actions"><button type="button" class="watch">▶ Watch</button>' +
+      '<a class="dl" href="' + RELEASE + v.file + '" download>Download</a></div></div>';
+    card.querySelector("h3").textContent = v.title;
+    card.querySelector(".meta").textContent = v.meta;
+    card.querySelector(".watch").addEventListener("click", function () { openModal(v); });
+    grid.appendChild(card);
+  });
+  var overlay = document.getElementById("overlay"), modal = document.getElementById("modal"),
+      mv = document.getElementById("modal-video"), mt = document.getElementById("modal-title");
+  function openModal(v) {
+    mt.textContent = v.title;
+    modal.className = "modal" + (v.portrait ? " portrait" : "");
+    mv.src = "/stream/" + v.file;
+    overlay.classList.add("open");
+    mv.play().catch(function () {});
+  }
+  function closeModal() { mv.pause(); mv.removeAttribute("src"); mv.load(); overlay.classList.remove("open"); }
+  document.getElementById("modal-close").addEventListener("click", closeModal);
+  overlay.addEventListener("click", function (e) { if (e.target === overlay) closeModal(); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeModal(); });
+</script>
+</body>
+</html>

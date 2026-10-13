@@ -8,6 +8,10 @@ The core idea: instead of agents racing to push to the same branch and creating 
 
 What Verdict deliberately does NOT do: claim semantic conflict detection (path overlap is a *risk badge*, not a conflict claim), let LLMs gate merges (deterministic tests decide; LLMs only explain), or auto-merge (humans approve every promotion).
 
+## Media
+
+The 44-second sizzle cut (with August v2 voiceover, music-only, 4K, and vertical editions) lives on the [media page](https://verdict.hey-demo-827.workers.dev/media) — watch in the browser or download from the [sizzle-media-v1 release](https://github.com/Mike-Demo/verdict/releases/tag/sizzle-media-v1).
+
 ## Architecture
 
 ```
