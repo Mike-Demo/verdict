@@ -47,12 +47,12 @@ Agent declares intent → Verdict provisions isolated fork (Artifacts)
    ```bash
    wrangler queues create verdict-eval-q
    ```
-4. Set secrets (held-out tests are never in the repo; agents can't see them):
+4. Set secrets (held-out tests are never in the repo; agents cannot see them):
    ```bash
    wrangler secret put HELD_OUT_TESTS < your-heldout.test.js
    wrangler secret put INTERNAL_SECRET   # any random string; guards the internal eval endpoint
    ```
-   Write your own held-out tests for the demo task — they should test the requirements in ways the visible tests don't, so agents can't pass by overfitting to the visible suite.
+   Write your own held-out tests for the demo task — they should test the requirements in ways the visible tests do not, so agents cannot pass by overfitting to the visible suite.
 5. Push the sample project to Artifacts (see `sample/`), then deploy:
    ```bash
    wrangler deploy
@@ -70,7 +70,7 @@ Agent declares intent → Verdict provisions isolated fork (Artifacts)
 - **Intent before edit**: coordination happens at declaration time, not at merge time.
 - **Fork per candidate**: agents never touch each other's work or main.
 - **Deterministic gates**: tests pass/fail in a sandbox; no LLM judges the code.
-- **Held-out tests**: stored as a Worker secret, staged only inside the eval sandbox — agents can't game them.
+- **Held-out tests**: stored as a Worker secret, staged only inside the eval sandbox — agents cannot game them.
 - **Heat, not conflicts**: path overlap is shown as a badge; Verdict never claims to understand semantics.
 - **Human in the loop**: every promotion needs a human decision with a rationale.
 - **Fast-forward only**: the sequencer rejects stale forks; history stays linear and auditable.
