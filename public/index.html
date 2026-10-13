@@ -709,16 +709,25 @@
       return;
     }
     if (empty) empty.style.display = "none";
-    var W = svg.clientWidth || 800, H = MAP_H;
-    svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+    // Grid layout: fixed-size cells guarantee nodes never overlap, at any count.
+    // Sort hottest first so the overlap cluster reads from the top-left.
+    active = active.slice().sort(function (a, b) { return (b.heat || 0) - (a.heat || 0); });
+    var W = svg.clientWidth || 800;
     var n = active.length;
-    var cx = W / 2, cy = H / 2;
-    var R = Math.min(W, H) * 0.32;
-    // Position nodes in a circle (or center if single)
+    var cellW = 216, cellH = 108, padTop = 14;
+    var cols = Math.max(1, Math.min(n, Math.floor(W / cellW)));
+    var rows = Math.ceil(n / cols);
+    var H = rows * cellH + padTop * 2;
+    svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+    svg.setAttribute("height", H);
+    var gridW = cols * cellW;
+    var x0 = (W - gridW) / 2 + cellW / 2;
     var pos = active.map(function (_, i) {
-      if (n === 1) return { x: cx, y: cy };
-      var a = (2 * Math.PI * i) / n - Math.PI / 2;
-      return { x: cx + R * Math.cos(a) * (W > 500 ? 1.6 : 1), y: cy + R * Math.sin(a) };
+      var col = i % cols, row = Math.floor(i / cols);
+      // Center a short final row under the rows above it
+      var inRow = (row === rows - 1) ? (n - row * cols) : cols;
+      var rowOffset = (cols - inRow) * cellW / 2;
+      return { x: x0 + rowOffset + col * cellW, y: padTop + row * cellH + cellH / 2 };
     });
     var html = "";
     // Draw overlap links first (behind nodes)
@@ -726,7 +735,8 @@
       for (var j = i + 1; j < n; j++) {
         var pi = active[i], pj = active[j];
         try {
-          var ppi = JSON.parse(pi.paths || "[]"), ppj = JSON.parse(pj.paths || "[]");
+          var ppi = Array.isArray(pi.paths) ? pi.paths : JSON.parse(pi.paths || "[]");
+          var ppj = Array.isArray(pj.paths) ? pj.paths : JSON.parse(pj.paths || "[]");
           var overlap = ppi.some(function (a) {
             return ppj.some(function (b) { return a === b || a.indexOf(b) === 0 || b.indexOf(a) === 0; });
           });
@@ -744,8 +754,9 @@
       var hc = heatColor(heat);
       var nw = 180, nh = 64;
       var x = p.x - nw / 2, y = p.y - nh / 2;
-      // Heat halo
-      html += '<rect x="' + (x - 8) + '" y="' + (y - 8) + '" width="' + (nw + 16) + '" height="' + (nh + 16) + '" rx="14" fill="none" stroke="' + hc + '" stroke-width="' + (heat >= 2 ? 3 : 2) + '" opacity="' + (heat > 0 ? 0.8 : 0.3) + '"/>';
+      // Heat halo (hot halos pulse so the map feels alive)
+      var haloAnim = heat >= 2 ? '<animate attributeName="opacity" values="0.85;0.35;0.85" dur="2.4s" repeatCount="indefinite"/>' : '';
+      html += '<rect x="' + (x - 8) + '" y="' + (y - 8) + '" width="' + (nw + 16) + '" height="' + (nh + 16) + '" rx="14" fill="none" stroke="' + hc + '" stroke-width="' + (heat >= 2 ? 3 : 2) + '" opacity="' + (heat > 0 ? 0.8 : 0.3) + '">' + haloAnim + '</rect>';
       // Node body
       html += '<rect x="' + x + '" y="' + y + '" width="' + nw + '" height="' + nh + '" rx="10" fill="#1a1e25" stroke="#262c37" stroke-width="1"/>';
       // Agent dot
