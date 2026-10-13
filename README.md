@@ -53,6 +53,9 @@ Agent declares intent → Verdict provisions isolated fork (Artifacts)
    wrangler secret put INTERNAL_SECRET   # any random string; guards the internal eval endpoint
    ```
    Write your own held-out tests for the demo task — they should test the requirements in ways the visible tests do not, so agents cannot pass by overfitting to the visible suite.
+
+   > [!CAUTION]
+   > Never commit your held-out tests file to the repository. The evaluation model depends on agents never seeing these tests. Keep the file outside the repo and load it only through the Worker secret.
 5. Push the sample project to Artifacts (see `sample/`), then deploy:
    ```bash
    wrangler deploy
@@ -60,7 +63,7 @@ Agent declares intent → Verdict provisions isolated fork (Artifacts)
 6. Open the Worker URL — the decision forge UI loads.
 
 ### Demo flow
-1. Declare 2–3 intents (agents) with overlapping `paths` — watch the heat badges.
+1. Declare two or three intents (agents) with overlapping `paths` — watch the heat badges.
 2. Each agent: `POST /api/intents/<id>/fork` → clone with the returned token → implement → push → `POST /api/intents/<id>/submit {"commit": "<sha>"}`.
 3. Evaluations run automatically (Sandbox: install, visible tests, held-out tests).
 4. Review decision cards at the UI. Approve one: `POST /api/decide` → use the 60s token to fast-forward-push base main → `POST /api/promotions/confirm`.
