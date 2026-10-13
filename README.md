@@ -81,7 +81,7 @@ Agent declares intent → Verdict provisions isolated fork (Artifacts)
 - **Heat, not conflicts**: path overlap is shown as a badge; Verdict never claims to understand semantics.
 - **Human in the loop**: every promotion needs a human decision with a rationale.
 - **Fast-forward only**: the sequencer rejects stale forks; history stays linear and auditable.
-- **Append-only ledger**: every intent, fork, evaluation, decision, promotion, and undo is recorded.
+- **Append-only ledger**: every intent, fork, evaluation, decision, promotion, and undo is recorded. The ledger is hash-chained from seq 92 onward; the current tip hash is anchored in [LEDGER_ANCHOR.md](LEDGER_ANCHOR.md) so the chain can be verified against a value outside the database.
 
 ## License
 MIT — see [LICENSE](LICENSE).
