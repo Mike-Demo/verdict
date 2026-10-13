@@ -6,17 +6,17 @@
 <title>Verdict — Decision Forge</title>
 <style>
   :root {
-    --bg0: #0e1013;
-    --bg1: #14171c;
-    --bg2: #1a1e25;
-    --bg3: #20262f;
-    --line: #262c37;
-    --line-soft: #1e232c;
-    --txt: #e9ebf1;
-    --mut: #9aa2b0;
-    --dim: #646c7a;
-    --amber: #e5a13c;
-    --amber-ink: #f4c26b;
+    --bg0: #131314;
+    --bg1: #1b1b1c;
+    --bg2: #232324;
+    --bg3: #2b2b2c;
+    --line: #404041;
+    --line-soft: #2e2e2f;
+    --txt: #f2f2f2;
+    --mut: #a3a3a4;
+    --dim: #767677;
+    --amber: #f48120;
+    --amber-ink: #faad3f;
     --red: #dd5f5f;
     --green: #5fb98a;
     --blue: #6aa8e0;
@@ -73,7 +73,7 @@
     padding: 20px 22px;
     margin-bottom: 14px;
   }
-  .card.accent { border-color: #3a2f1c; background: #171712; }
+  .card.accent { border-color: #402a0c; background: #171712; }
   .empty {
     border: 1px dashed var(--line);
     border-radius: var(--r);
@@ -93,12 +93,12 @@
   }
   .pill.st-declared { color: var(--mut); }
   .pill.st-forked { color: var(--blue); border-color: #27405c; }
-  .pill.st-submitted { color: var(--amber-ink); border-color: #4a3a20; }
-  .pill.st-evaluated { color: var(--amber-ink); border-color: #4a3a20; }
+  .pill.st-submitted { color: var(--amber-ink); border-color: #4d2f0e; }
+  .pill.st-evaluated { color: var(--amber-ink); border-color: #4d2f0e; }
   .pill.st-decided { color: var(--green); border-color: #24473a; }
   .pill.st-promoted { color: var(--green); border-color: #24473a; background: #14201b; }
   .heat.clear { color: var(--dim); }
-  .heat.warm { color: var(--amber-ink); border-color: #4a3a20; background: #1d1810; }
+  .heat.warm { color: var(--amber-ink); border-color: #4d2f0e; background: #261806; }
   .heat.hot { color: #f08a8a; border-color: #552a2a; background: #201414; }
 
   /* ---------- intent rows ---------- */
@@ -109,7 +109,7 @@
   .paths { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
   .path {
     font-family: var(--mono); font-size: 12px; color: var(--amber-ink);
-    background: #1d1810; border: 1px solid #3a2f1c; border-radius: 6px; padding: 2px 8px;
+    background: #261806; border: 1px solid #402a0c; border-radius: 6px; padding: 2px 8px;
   }
   .cand-line { font-family: var(--mono); font-size: 12.5px; color: var(--mut); margin-top: 8px; }
   .cand-line .sha { color: var(--txt); }
@@ -137,7 +137,7 @@
   }
   .btn:hover { border-color: var(--dim); }
   .btn:disabled { opacity: 0.45; cursor: not-allowed; }
-  .btn.primary { background: var(--amber); border-color: var(--amber); color: #171204; }
+  .btn.primary { background: var(--amber); border-color: var(--amber); color: #201203; }
   .btn.primary:hover { background: var(--amber-ink); }
   .btn.danger { color: #f08a8a; border-color: #552a2a; background: #201414; }
   .btn.ghost { background: transparent; }
@@ -200,7 +200,7 @@
     display: flex; gap: 12px; align-items: flex-start;
   }
   .notice.info { border-color: #27405c; background: #131a24; color: #a9c8e8; }
-  .notice.warn { border-color: #5c4a27; background: #241d13; color: #e8c88a; }
+  .notice.warn { border-color: #6b4a12; background: #2b1e07; color: #faad3f; }
   .notice button.dismiss {
     margin-left: auto; background: none; border: none; color: inherit; cursor: pointer;
     font-size: 16px; line-height: 1; padding: 0 0 0 8px; flex: none;
@@ -677,8 +677,8 @@
   var MAP_W = 800, MAP_H = 320;
   function heatColor(h) {
     if (h >= 2) return "#dd5f5f";  // red — high
-    if (h === 1) return "#e5a13c"; // amber — medium
-    return "#646c7a";              // grey — low
+    if (h === 1) return "#faad3f"; // amber — medium
+    return "#767677";              // grey — low
   }
   function renderMap(intents) {
     var svg = document.getElementById("map-svg");
@@ -734,7 +734,7 @@
       // Node body
       html += '<rect x="' + x + '" y="' + y + '" width="' + nw + '" height="' + nh + '" rx="10" fill="#1a1e25" stroke="#262c37" stroke-width="1"/>';
       // Agent dot
-      var dotColors = ["#6aa8e0", "#5fb98a", "#e5a13c", "#dd5f5f", "#b48ae0"];
+      var dotColors = ["#6aa8e0", "#5fb98a", "#f48120", "#dd5f5f", "#b48ae0"];
       var dc = dotColors[i % dotColors.length];
       html += '<circle cx="' + (x + 18) + '" cy="' + (y + 20) + '" r="7" fill="' + dc + '"/>';
       // Title
@@ -763,8 +763,8 @@
     var span = Math.max(maxT - minT, 1);
     var kindColors = {
       "intent.declared": "#6aa8e0", "fork.created": "#5fb98a",
-      "candidate.submitted": "#e5a13c", "evaluation.done": "#b48ae0",
-      "decision.made": "#e5a13c", "promotion.done": "#5fb98a", "undo.done": "#dd5f5f"
+      "candidate.submitted": "#f48120", "evaluation.done": "#b48ae0",
+      "decision.made": "#f48120", "promotion.done": "#5fb98a", "undo.done": "#dd5f5f"
     };
     container.innerHTML = scrubberData.map(function (e, i) {
       var pct = ((e.at - minT) / span * 100).toFixed(1);
