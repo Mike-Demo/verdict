@@ -122,7 +122,7 @@ export async function runEvaluation(env: Env, params: EvalParams) {
 		);
 		if (out.clone?.ok) {
 			const diffOut = await sandbox.exec(
-				`cd /workspace/cand && git remote add verdict-base ${baseAuthRemote} 2>/dev/null; git fetch verdict-base main --depth=50 >/dev/null 2>&1; git diff --name-only verdict-base/main HEAD 2>/dev/null`,
+				`cd /workspace/cand && git remote add verdict-base ${baseAuthRemote} 2>/dev/null; git fetch verdict-base main --depth=50 >/dev/null 2>&1 && git diff --name-only verdict-base/main HEAD 2>/dev/null`,
 			);
 			if (diffOut.exitCode === 0) {
 				changedFiles = diffOut.stdout
