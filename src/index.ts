@@ -1,9 +1,7 @@
-import { WorkflowEntrypoint } from 'cloudflare:workers';
 import { Sandbox } from '@cloudflare/sandbox';
 import { Env } from './db';
 import { handleApi } from './api';
 import { runEvaluation } from './evaluate';
-import { getSandbox } from '@cloudflare/sandbox';
 
 export { Sandbox } from '@cloudflare/sandbox';
 
@@ -11,29 +9,43 @@ export default {
 	async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
 		const url = new URL(req.url);
 		// because the Sandbox binding only initializes in fetch context.
+		// Post-submission hardening (review #2, H2): this endpoint returned a
+		// bare Cloudflare 1101 on every POST in production — an exception
+		// escaped before the handler could answer (root cause unproven; needs
+		// Worker logs). The whole handler is now wrapped so it ALWAYS answers
+		// JSON: 400 on a malformed body, 500 with the error on any throw —
+		// never a platform 1101.
 		if (url.pathname === '/api/internal/eval' && req.method === 'POST') {
-			if (req.headers.get('x-verdict-secret') !== env.INTERNAL_SECRET) {
-				return Response.json({ error: 'forbidden' }, 403);
-			}
-			const params = (await req.json()) as any;
-			if (new URL(req.url).searchParams.get('noop') === '1') {
-				return Response.json({ ok: true, noop: true, params });
-			}
-			// Dedup: skip if an evaluation already exists for this candidate+commit (V4 fix)
-			// (prevents double-eval from waitUntil + queue consumer both firing).
-			if (params.candidate_id && params.commit) {
-				const existing: any = await env.DB.prepare(
-					`SELECT id FROM evaluations WHERE candidate_id = ? AND commit_sha = ? LIMIT 1`
-				).bind(params.candidate_id, params.commit).first();
-				if (existing) {
-					return Response.json({ ok: true, deduped: true, evaluation_id: existing.id });
-				}
-			}
 			try {
+				if (req.headers.get('x-verdict-secret') !== env.INTERNAL_SECRET) {
+					return Response.json({ error: 'forbidden' }, { status: 403 });
+				}
+				let params: any;
+				try {
+					params = await req.json();
+				} catch {
+					return Response.json({ error: 'invalid JSON body' }, { status: 400 });
+				}
+				if (url.searchParams.get('noop') === '1') {
+					return Response.json({ ok: true, noop: true, params });
+				}
+				// Dedup: skip if an evaluation already exists for this candidate+commit (V4 fix)
+				// (prevents double-eval from waitUntil + queue consumer both firing).
+				if (params.candidate_id && params.commit) {
+					const existing: any = await env.DB.prepare(
+						`SELECT id FROM evaluations WHERE candidate_id = ? AND commit_sha = ? LIMIT 1`
+					).bind(params.candidate_id, params.commit).first();
+					if (existing) {
+						return Response.json({ ok: true, deduped: true, evaluation_id: existing.id });
+					}
+				}
 				const result = await runEvaluation(env, params);
 				return Response.json({ ok: true, result });
 			} catch (e: any) {
-				return Response.json({ ok: false, error: String(e?.message ?? e).slice(0, 500) }, 500);
+				return Response.json(
+					{ ok: false, error: String(e?.message ?? e).slice(0, 500) },
+					{ status: 500 },
+				);
 			}
 		}
 		if (url.pathname.startsWith('/api/')) {

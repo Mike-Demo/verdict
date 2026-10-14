@@ -10,7 +10,29 @@ async function disposeAll(_handles: any[]) {
 	// crash the isolate with an uncatchable 1101. Handles are GC'd.
 }
 
+// Post-submission hardening (review #2, L2): body parsing is guarded — a
+// malformed JSON body gets a JSON 400, not an unhandled throw — and the
+// whole handler is wrapped so an unexpected error answers JSON 500 instead
+// of a platform error page.
+const INVALID_JSON = Symbol('invalid-json');
+async function bodyJson(req: Request): Promise<any> {
+	try {
+		return await req.json();
+	} catch {
+		return INVALID_JSON;
+	}
+}
+
 export async function handleApi(req: Request, env: Env, url: URL, ctx?: ExecutionContext): Promise<Response> {
+	try {
+		return await handleApiImpl(req, env, url, ctx);
+	} catch (e: any) {
+		console.error('[verdict] unhandled API error:', String(e?.message ?? e).slice(0, 300));
+		return json({ error: 'internal error', detail: String(e?.message ?? e).slice(0, 300) }, 500);
+	}
+}
+
+async function handleApiImpl(req: Request, env: Env, url: URL, ctx?: ExecutionContext): Promise<Response> {
 	const path = url.pathname;
 	const method = req.method;
 
@@ -46,7 +68,8 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 
 	// --- Declare intent ---
 	if (method === 'POST' && path === '/api/intents') {
-		const body = (await req.json()) as { title: string; description?: string; paths: string[]; agent: string };
+		const body = (await bodyJson(req)) as { title: string; description?: string; paths: string[]; agent: string };
+		if (body === (INVALID_JSON as any)) return json({ error: 'invalid JSON body' }, 400);
 		if (!body.title || !Array.isArray(body.paths) || !body.agent) {
 			return json({ error: 'title, paths[], agent required' }, 400);
 		}
@@ -131,13 +154,13 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 			} catch {}
 			await env.DB.prepare(`UPDATE intents SET spec_commit = ? WHERE id = ?`).bind(specCommit, id).run();
 			const repoHandle: any = await env.ARTIFACTS.get(repoName);
-			let token: string;
-			try {
-				const t = await repoHandle.createToken('write', 86400);
-				token = t.plaintext;
-			} finally {
-				await repoHandle?.[Symbol.asyncDispose]?.();
-			}
+			// Post-submission hardening (review #2, M8): this used to call
+			// repoHandle[Symbol.asyncDispose]() in a finally — the exact call
+			// the disposeAll note above warns can crash the isolate with an
+			// uncatchable 1101. The handle now goes through the same deliberate
+			// no-op disposal pattern as every other handler (GC'd).
+			const t = await repoHandle.createToken('write', 86400);
+			const token: string = t.plaintext;
 			const candidateId = uid('cand');
 			await env.DB.prepare(`INSERT INTO candidates (id, intent_id, repo, commit_sha) VALUES (?, ?, ?, NULL)`)
 				.bind(candidateId, id, repoName)
@@ -157,7 +180,14 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 		const id = path.split('/')[3];
 		const intent: any = await getIntent(env, id);
 		if (!intent) return json({ error: 'intent not found' }, 404);
-		const body = (await req.json()) as { commit: string };
+		// Post-submission hardening (review #2, L4): submit used to accept any
+		// status, so a decided/promoted intent could be moved back to
+		// 'submitted' and re-pointed. Only forked/submitted intents may submit.
+		if (intent.status !== 'forked' && intent.status !== 'submitted') {
+			return json({ error: `intent is ${intent.status}; only forked or submitted intents can be submitted` }, 409);
+		}
+		const body = (await bodyJson(req)) as { commit: string };
+		if (body === (INVALID_JSON as any)) return json({ error: 'invalid JSON body' }, 400);
 		if (!body.commit) return json({ error: 'commit sha required' }, 400);
 		// V1 fix: validate commit SHA format to prevent shell injection
 		if (!/^[0-9a-f]{7,40}$/i.test(body.commit)) {
@@ -170,9 +200,16 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 			.run();
 		await env.DB.prepare(`UPDATE intents SET status = 'submitted' WHERE id = ?`).bind(id).run();
 		await env.EVAL_QUEUE.send({ candidate_id: candidate.id, repo: candidate.repo, ref: 'main', commit: body.commit });
-		// Workaround: queue consumer doesn't fire (platform issue). Run eval directly via waitUntil.
-		// waitUntil keeps the fetch context alive, so the Sandbox binding works.
-		// The queue remains as backup; runEvaluation dedupes via the eval endpoint.
+		// Evaluations are triggered here, in the submit request lifecycle, via
+		// waitUntil (which keeps the fetch context alive, so the Sandbox
+		// binding works). The queue consumer is a SECONDARY path: it self-fetches
+		// /api/internal/eval, and that endpoint was found dead in production —
+		// Cloudflare 1101 on every POST, verified 2026-10-13 and 2026-10-14
+		// (review #2, H2). The consumer's own code reviewed as correct; the
+		// endpoint's root cause is unproven (needs Worker logs). The endpoint
+		// handler is now defensively wrapped to answer JSON instead of
+		// throwing (see src/index.ts). The dedupe check below keeps the two
+		// trigger paths from double-evaluating a commit.
 		if (ctx) {
 			const evalParams = { candidate_id: candidate.id, repo: candidate.repo, ref: 'main', commit: body.commit };
 			ctx.waitUntil((async () => {
@@ -232,7 +269,8 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 
 	// --- Human decision + merge sequencer: FF check, mint 60s promotion token ---
 	if (method === 'POST' && path === '/api/decide') {
-		const body = (await req.json()) as { intent_id: string; candidate_id: string; rationale?: string };
+		const body = (await bodyJson(req)) as { intent_id: string; candidate_id: string; rationale?: string; override_test_touch?: boolean };
+		if (body === (INVALID_JSON as any)) return json({ error: 'invalid JSON body' }, 400);
 		const intent: any = await getIntent(env, body.intent_id);
 		const candidate: any = await env.DB.prepare(`SELECT * FROM candidates WHERE id = ?`).bind(body.candidate_id).first();
 		if (!intent || !candidate || candidate.intent_id !== intent.id) {
@@ -250,8 +288,23 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 		// The candidate may have modified its own judge.
 		let evalChecks: any = {};
 		try { evalChecks = JSON.parse(evaluation.checks || '{}'); } catch {}
-		// V16 fix (round 2): check explicitly for true (not truthiness — "false" string would bypass)
-		if (evalChecks.touched_tests && body.override_test_touch !== true) {
+		// Post-submission hardening (review #2, M4): touched_tests is tri-state.
+		// null/absent means the scope check never ran (or the evaluation predates
+		// scope fields) — that is UNVERIFIED, not clean, and must never sail
+		// through the one gate designed to catch test tampering. It gets the
+		// same 409 family as a confirmed test touch: a human must explicitly
+		// confirm with override_test_touch === true to proceed.
+		if (evalChecks.touched_tests === null || evalChecks.touched_tests === undefined) {
+			if (body.override_test_touch !== true) {
+				return json({
+					error: 'candidate test-touch status is unverified — human confirmation required',
+					guidance: 'The scope check did not run (or its result is missing) for this evaluation, so whether the candidate touched test paths is unknown. If you accept that risk, resubmit with override_test_touch=true (boolean).',
+					touched_tests: null,
+					unverified: true,
+				}, 409);
+			}
+		} else if (evalChecks.touched_tests && body.override_test_touch !== true) {
+			// V16 fix (round 2): check explicitly for true (not truthiness — "false" string would bypass)
 			return json({
 				error: 'candidate touched test paths — human override required',
 				guidance: 'The candidate modified test files. If this was intentional, resubmit with override_test_touch=true (boolean).',
@@ -310,14 +363,30 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 					409,
 				);
 			}
-			const token = await baseRepo.createToken('write', 60);
+			// Post-submission hardening (review #2, M2): insert the decision row
+			// BEFORE minting the promotion token — previously a failed insert
+			// left an orphaned live write token. The UNIQUE index on
+			// decisions(intent_id) (schema.sql) makes a racing duplicate insert
+			// fail; treat that as the existing already-decided 409 and mint
+			// nothing.
 			const decisionId = uid('dec');
-			await env.DB.prepare(
-				`INSERT INTO decisions (id, intent_id, winner_candidate_id, rationale, decided_at) VALUES (?, ?, ?, ?, ?)`,
-			)
-				.bind(decisionId, intent.id, candidate.id, body.rationale ?? '', now())
-				.run();
+			try {
+				await env.DB.prepare(
+					`INSERT INTO decisions (id, intent_id, winner_candidate_id, rationale, decided_at) VALUES (?, ?, ?, ?, ?)`,
+				)
+					.bind(decisionId, intent.id, candidate.id, body.rationale ?? '', now())
+					.run();
+			} catch (e: any) {
+				const raced: any = await env.DB.prepare(
+					`SELECT id FROM decisions WHERE intent_id = ? LIMIT 1`
+				).bind(intent.id).first();
+				if (raced) {
+					return json({ error: 'intent already has a decision', decision_id: raced.id }, 409);
+				}
+				throw e;
+			}
 			await env.DB.prepare(`UPDATE intents SET status = 'decided' WHERE id = ?`).bind(intent.id).run();
+			const token = await baseRepo.createToken('write', 60);
 			await ledger(env, 'decision.made', decisionId, {
 				intent_id: intent.id,
 				winner: candidate.id,
@@ -334,7 +403,8 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 
 	// --- Confirm a promotion after the agent fast-forward pushes ---
 	if (method === 'POST' && path === '/api/promotions/confirm') {
-		const body = (await req.json()) as { decision_id: string };
+		const body = (await bodyJson(req)) as { decision_id: string };
+		if (body === (INVALID_JSON as any)) return json({ error: 'invalid JSON body' }, 400);
 		const decision: any = await env.DB.prepare(`SELECT * FROM decisions WHERE id = ?`).bind(body.decision_id).first();
 		if (!decision) return json({ error: 'decision not found' }, 404);
 		// N3 fix: prevent double-record (idempotency)
@@ -373,11 +443,22 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 			}
 			const prev = JSON.parse((await env.DB.prepare(`SELECT payload FROM ledger WHERE kind = 'decision.made' AND ref_id = ?`).bind(decision.id).first() as any)?.payload ?? '{}');
 			const promotionId = uid('promo');
-			await env.DB.prepare(
-				`INSERT INTO promotions (id, base_repo, prev_head, new_head, candidate_id, decision_id, at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			)
-				.bind(promotionId, env.BASE_REPO, prev.mainHead, mainHead, candidate.id, decision.id, now())
-				.run();
+			// Post-submission hardening (review #2, M2): the UNIQUE index on
+			// promotions(decision_id) makes a racing duplicate insert fail;
+			// treat that as the existing idempotent already-confirmed response.
+			try {
+				await env.DB.prepare(
+					`INSERT INTO promotions (id, base_repo, prev_head, new_head, candidate_id, decision_id, at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+				)
+					.bind(promotionId, env.BASE_REPO, prev.mainHead, mainHead, candidate.id, decision.id, now())
+					.run();
+			} catch (e: any) {
+				const raced: any = await env.DB.prepare(`SELECT id FROM promotions WHERE decision_id = ? LIMIT 1`).bind(decision.id).first();
+				if (raced) {
+					return json({ confirmed: true, promotion_id: raced.id, note: 'already confirmed' });
+				}
+				throw e;
+			}
 			await env.DB.prepare(`UPDATE intents SET status = 'promoted' WHERE id = ?`).bind(decision.intent_id).run();
 			await ledger(env, 'promotion.done', promotionId, { decision_id: decision.id, prev_head: prev.mainHead, new_head: mainHead });
 			return json({ confirmed: true, promotion_id: promotionId, prev_head: prev.mainHead, new_head: mainHead });
@@ -388,7 +469,8 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 
 	// --- One-click undo: mint a token; the operator push restores prev_head ---
 	if (method === 'POST' && path === '/api/undo') {
-		const body = (await req.json()) as { promotion_id: string };
+		const body = (await bodyJson(req)) as { promotion_id: string };
+		if (body === (INVALID_JSON as any)) return json({ error: 'invalid JSON body' }, 400);
 		const promo: any = await env.DB.prepare(`SELECT * FROM promotions WHERE id = ?`).bind(body.promotion_id).first();
 		if (!promo || promo.undone) return json({ error: 'promotion not found or already undone' }, 404);
 		let baseRepo: any = null;
@@ -397,9 +479,16 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 			const token = await baseRepo.createToken('write', 300);
 			// N4 fix: don't mark undone here — only in /api/undo/confirm after verified restore.
 			// This allows retry if the push fails or token expires.
-			await ledger(env, 'undo.done', promo.id, { prev_head: promo.prev_head, restored_to: promo.prev_head });
+			// Post-submission hardening (review #2, M5): the mint-time ledger
+			// entry is undo.requested, NOT undo.done — the append-only ledger
+			// must not assert an undo that hasn't happened (a token can expire
+			// or the operator can walk away). undo.done is written only in
+			// /api/undo/confirm, alongside undo.confirmed, after the restore
+			// is verified. The response says the same: undone is false until then.
+			await ledger(env, 'undo.requested', promo.id, { prev_head: promo.prev_head, restored_to: promo.prev_head, restore_pending: true });
 			return json({
-				undone: true,
+				undone: false,
+				restore_pending: true,
 				restore_token: token.plaintext,
 				expires_in: 300,
 				restore_ref: promo.prev_head,
@@ -412,7 +501,8 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 
 	// V7 fix: implement /api/undo/confirm (was referenced but missing)
 	if (method === 'POST' && path === '/api/undo/confirm') {
-		const body = (await req.json()) as { promotion_id: string };
+		const body = (await bodyJson(req)) as { promotion_id: string };
+		if (body === (INVALID_JSON as any)) return json({ error: 'invalid JSON body' }, 400);
 		if (!body.promotion_id) return json({ error: 'promotion_id required' }, 400);
 		const promo: any = await env.DB.prepare(`SELECT * FROM promotions WHERE id = ?`).bind(body.promotion_id).first();
 		if (!promo) return json({ error: 'promotion not found' }, 404);
@@ -426,6 +516,9 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 			if (currentHead === promo.prev_head) {
 				// N4 fix: mark undone only here, after verified restore
 				await env.DB.prepare(`UPDATE promotions SET undone = 1 WHERE id = ?`).bind(promo.id).run();
+				// Post-submission hardening (review #2, M5): undo.done belongs
+				// HERE — at verified restore — not at token-mint time.
+				await ledger(env, 'undo.done', promo.id, { prev_head: promo.prev_head, restored_to: currentHead });
 				await ledger(env, 'undo.confirmed', promo.id, { restored_to: currentHead });
 				return json({ confirmed: true, head: currentHead });
 			}
@@ -438,8 +531,49 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 	// --- Append-only ledger ---
 	if (method === 'GET' && path === '/api/ledger') {
 		// V17: include prev_hash/hash so external verifiers can check the chain
-		const { results } = await env.DB.prepare(`SELECT seq, kind, ref_id, payload, prev_hash, hash, at FROM ledger ORDER BY seq ASC LIMIT 500`).all();
-		return json((results ?? []).map((r: any) => ({ ...r, payload: JSON.parse(r.payload) })));
+		// Post-submission hardening (review #2, L3): this used to return the
+		// OLDEST 500 rows (ORDER BY seq ASC LIMIT 500), so past 500 entries the
+		// API would silently stop serving the tip — external verifiers could
+		// no longer reach the anchored seq. Now:
+		//  - default: the LATEST 500 rows, seq-ascending (same bare-array shape
+		//    the UI/CLI consume), with x-ledger-total / x-ledger-truncated
+		//    headers making any truncation explicit;
+		//  - ?after=<seq>: forward pagination — { entries, total, truncated,
+		//    after, next_after } — so verifiers can walk the whole chain.
+		const totalRow: any = await env.DB.prepare(`SELECT COUNT(*) AS n FROM ledger`).first();
+		const total = totalRow?.n ?? 0;
+		const shape = (r: any) => ({ ...r, payload: JSON.parse(r.payload) });
+		const afterRaw = url.searchParams.get('after');
+		if (afterRaw !== null) {
+			const after = Number.parseInt(afterRaw, 10) || 0;
+			const limit = Math.min(Math.max(Number.parseInt(url.searchParams.get('limit') ?? '500', 10) || 500, 1), 1000);
+			const { results } = await env.DB.prepare(
+				`SELECT seq, kind, ref_id, payload, prev_hash, hash, at FROM ledger WHERE seq > ? ORDER BY seq ASC LIMIT ?`,
+			).bind(after, limit + 1).all();
+			const rows = results ?? [];
+			const truncated = rows.length > limit;
+			const page = truncated ? rows.slice(0, limit) : rows;
+			return json({
+				entries: page.map(shape),
+				total,
+				truncated,
+				after,
+				next_after: page.length ? page[page.length - 1].seq : after,
+			});
+		}
+		const { results } = await env.DB.prepare(
+			`SELECT seq, kind, ref_id, payload, prev_hash, hash, at FROM (
+				SELECT seq, kind, ref_id, payload, prev_hash, hash, at FROM ledger ORDER BY seq DESC LIMIT 500
+			) ORDER BY seq ASC`,
+		).all();
+		const rows = results ?? [];
+		return new Response(JSON.stringify(rows.map(shape)), {
+			headers: {
+				'content-type': 'application/json',
+				'x-ledger-total': String(total),
+				'x-ledger-truncated': String(total > rows.length),
+			},
+		});
 	}
 
 	return json({ error: 'not found' }, 404);

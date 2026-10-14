@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS intents (
   description TEXT DEFAULT '',
   paths TEXT NOT NULL,          -- JSON array of path prefixes the agent intends to touch
   agent TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'declared', -- declared|forked|submitted|evaluated|decided
+  status TEXT NOT NULL DEFAULT 'declared', -- declared|forked|submitted|evaluated|decided|promoted
   spec_commit TEXT,               -- sample main HEAD pinned at fork time (the spec the candidate is judged against)
   created_at INTEGER NOT NULL
 );
@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS promotions (
 -- Append-only decision ledger. Rows are never updated or deleted.
 CREATE TABLE IF NOT EXISTS ledger (
   seq INTEGER PRIMARY KEY AUTOINCREMENT,
-  kind TEXT NOT NULL,            -- intent.declared|fork.created|candidate.submitted|evaluation.done|decision.made|promotion.done|undo.done
+  kind TEXT NOT NULL,            -- intent.declared|fork.created|candidate.submitted|evaluation.done|decision.made|promotion.done|undo.requested|undo.done|undo.confirmed
   ref_id TEXT,
   payload TEXT NOT NULL,         -- JSON
   prev_hash TEXT,                -- V17: hash chain for tamper detection
@@ -70,3 +70,11 @@ CREATE INDEX IF NOT EXISTS idx_candidates_intent ON candidates(intent_id);
 CREATE INDEX IF NOT EXISTS idx_evaluations_candidate ON evaluations(candidate_id);
 CREATE INDEX IF NOT EXISTS idx_ledger_kind ON ledger(kind);
 CREATE INDEX IF NOT EXISTS idx_intents_status ON intents(status);
+
+-- Post-submission hardening (review #2, M1 + M2): the one-decision-per-intent
+-- and one-promotion-per-decision invariants, and the ledger chain's
+-- one-child-per-tip property, are enforced by the database — not by
+-- check-then-insert races in the handlers.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_decisions_intent ON decisions(intent_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_promotions_decision ON promotions(decision_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ledger_prev_hash ON ledger(prev_hash);

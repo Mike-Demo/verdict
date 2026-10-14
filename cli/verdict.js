@@ -6,8 +6,11 @@
 //   verdict ledger
 //
 // Env: VERDICT_API (default https://verdict.hey-demo-827.workers.dev)
+//      VERDICT_SECRET — the Worker's write secret; required for `intent`
+//      (all API writes need the x-verdict-secret header). Reads work without it.
 
 const BASE = process.env.VERDICT_API || 'https://verdict.hey-demo-827.workers.dev';
+const SECRET = process.env.VERDICT_SECRET || '';
 
 function parseArgs(argv) {
 	const out = { _: [] };
@@ -25,7 +28,9 @@ function parseArgs(argv) {
 }
 
 async function api(path, opts = {}) {
-	const res = await fetch(BASE + path, { headers: { 'content-type': 'application/json' }, ...opts });
+	const headers = { 'content-type': 'application/json', ...(opts.headers || {}) };
+	if (opts.method === 'POST' && SECRET) headers['x-verdict-secret'] = SECRET;
+	const res = await fetch(BASE + path, { ...opts, headers });
 	const data = await res.json().catch(() => ({}));
 	if (!res.ok) {
 		console.error(`error: HTTP ${res.status} — ${data.error || data.reason || JSON.stringify(data)}`);

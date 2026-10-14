@@ -621,8 +621,12 @@
         return "Decision made — " + strong(p.intent_id || e.ref_id) + (p.rationale ? " · “" + esc(String(p.rationale).slice(0, 80)) + "”" : "");
       case "promotion.done":
         return "Promoted — " + strong(short(p.prev_head)) + " → " + strong(short(p.new_head));
+      case "undo.requested":
+        return "Undo requested — restore to " + strong(short(p.restored_to)) + " pending operator push";
       case "undo.done":
-        return "Undone — main restored to " + strong(short(p.restore_ref || e.ref_id));
+        return "Undone — main restored to " + strong(short(p.restored_to));
+      case "undo.confirmed":
+        return "Undo confirmed — main restored to " + strong(short(p.restored_to));
       default:
         return esc(e.kind || "event") + " — " + esc(e.ref_id || "");
     }
@@ -638,7 +642,7 @@
       return;
     }
     el.innerHTML = sorted.map(function (e) {
-      var kcls = e.kind === "promotion.done" ? "ledger-kind k-promotion" : (e.kind === "undo.done" ? "ledger-kind k-undo" : "ledger-kind");
+      var kcls = e.kind === "promotion.done" ? "ledger-kind k-promotion" : (String(e.kind || "").indexOf("undo.") === 0 ? "ledger-kind k-undo" : "ledger-kind");
       return '<div class="ledger-row">' +
         '<span class="ledger-seq">#' + esc(String(e.seq == null ? "–" : e.seq)) + "</span>" +
         '<span class="' + kcls + '">' + esc(e.kind || "") + "</span>" +
@@ -652,6 +656,11 @@
   function renderPromotions(ledger) {
     var promos = (ledger || []).filter(function (e) { return e.kind === "promotion.done"; })
       .sort(function (a, b) { return (b.seq || 0) - (a.seq || 0); });
+    // Post-submission hardening (review #2, M5): a promotion whose undo has
+    // been CONFIRMED (undo.confirmed in the ledger) renders an UNDONE state —
+    // previously the panel kept badging it "PROMOTED" forever.
+    var undoneIds = {};
+    (ledger || []).forEach(function (e) { if (e.kind === "undo.confirmed" && e.ref_id) undoneIds[e.ref_id] = true; });
     var el = $("promos-list");
     if (!promos.length) {
       el.innerHTML = '<div class="empty"><strong>No promotions yet.</strong><br>Confirmed promotions appear here, each with one-click undo.</div>';
@@ -660,9 +669,12 @@
     el.innerHTML = promos.map(function (e) {
       var p = e.payload || {};
       var pid = p.promotion_id || e.ref_id || String(e.seq);
+      var isUndone = !!undoneIds[pid];
       var undo = ui.undos[pid];
       var undoHtml;
-      if (undo) {
+      if (isUndone) {
+        undoHtml = '<div class="notice info" style="margin:14px 0 0"><span>Undone — main was restored to <span class="mono">' + esc(short(p.prev_head)) + '</span> (undo confirmed in the ledger).</span></div>';
+      } else if (undo) {
         var cmd = "git push --force https://x:" + undo.restore_token + "@" + HOST + "/git/" + BASE_REPO + ".git " + undo.restore_ref + ":main";
         undoHtml = '<div class="cmd-block" id="undo-' + esc(pid) + '"><span class="lbl">restore command — force-push main back</span>' +
           '<button class="btn small ghost copy-btn" data-action="copy" data-target="undo-' + esc(pid) + '">copy</button>' +
@@ -673,7 +685,7 @@
       return '<div class="card">' +
         '<div class="intent-top">' +
           '<h3 class="intent-title">Promotion #' + esc(String(e.seq == null ? "?" : e.seq)) + "</h3>" +
-          '<span class="pill st-promoted">promoted</span>' +
+          (isUndone ? '<span class="pill" style="background:#5a2b2b;color:#f08a8a">undone</span>' : '<span class="pill st-promoted">promoted</span>') +
         "</div>" +
         '<div class="promo-head"><span class="sha">' + esc(short(p.prev_head)) + '</span> → <span class="sha">' + esc(short(p.new_head)) + '</span>' +
         ' <span style="color:var(--dim)">· ' + esc(fmtTime(e.at)) + "</span></div>" +
@@ -791,7 +803,8 @@
     var kindColors = {
       "intent.declared": "#6aa8e0", "fork.created": "#5fb98a",
       "candidate.submitted": "#f48120", "evaluation.done": "#b48ae0",
-      "decision.made": "#f48120", "promotion.done": "#5fb98a", "undo.done": "#dd5f5f"
+      "decision.made": "#f48120", "promotion.done": "#5fb98a", "undo.done": "#dd5f5f",
+      "undo.requested": "#faad3f", "undo.confirmed": "#dd5f5f"
     };
     container.innerHTML = scrubberData.map(function (e, i) {
       var pct = ((e.at - minT) / span * 100).toFixed(1);
@@ -825,7 +838,9 @@
       case "evaluation.done": desc = "Evaluation: " + (p.pass ? "PASS" : "FAIL") + " — " + esc(p.summary || ""); break;
       case "decision.made": desc = "Decision: " + esc(p.rationale || "no rationale").slice(0, 120); break;
       case "promotion.done": desc = "Promoted: " + esc((p.prev_head || "").slice(0, 8)) + " → " + esc((p.new_head || "").slice(0, 8)); break;
-      case "undo.done": desc = "Undo: restored " + esc((p.restored || "").slice(0, 8)); break;
+      case "undo.requested": desc = "Undo requested: restore to " + esc((p.restored_to || "").slice(0, 8)) + " — pending operator push"; break;
+      case "undo.done": desc = "Undo: restored " + esc((p.restored_to || "").slice(0, 8)); break;
+      case "undo.confirmed": desc = "Undo confirmed: main at " + esc((p.restored_to || "").slice(0, 8)); break;
       default: desc = e.kind;
     }
     detail.innerHTML = '<strong style="color:var(--amber);">' + esc(timeStr) + '</strong> · ' + desc +
@@ -1102,7 +1117,7 @@
         body: JSON.stringify({ promotion_id: pid })
       }).then(function (r) {
         t.disabled = false;
-        if (r.ok && r.data.undone) {
+        if (r.ok && r.data.restore_pending && r.data.restore_token) {
           ui.undos[pid] = { restore_token: r.data.restore_token, restore_ref: r.data.restore_ref };
           poll();
         } else {

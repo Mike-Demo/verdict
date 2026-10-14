@@ -66,7 +66,14 @@ export async function runEvaluation(env: Env, params: EvalParams) {
 	const remote = `https://${env.ACCOUNT_HOST}/git/${env.NAMESPACE}/${repo}.git`;
 	const authRemote = remote.replace('https://', `https://x:${safeToken}@`);
 
-	const sandbox = getSandbox(env.SANDBOX, `eval-${candidate_id}-${Date.now().toString(36)}`);
+	// Post-submission hardening (review #2, L6): sandboxes used to be created
+	// per run (eval-<candidate>-<timestamp>) and never destroyed, accumulating
+	// toward the max_instances cap. Names are now drawn from a bounded pool of
+	// 10 derived from the candidate id; the per-run `rm -rf /workspace/cand`
+	// in the clone step below resets the workspace between reuses.
+	let poolHash = 0;
+	for (let i = 0; i < candidate_id.length; i++) poolHash = (poolHash * 31 + candidate_id.charCodeAt(i)) >>> 0;
+	const sandbox = getSandbox(env.SANDBOX, `eval-pool-${poolHash % 10}`);
 	const out: any = { clone: null, install: null, visible: null, heldOut: null };
 	try {
 		// Copilot audit fix: defense-in-depth on shell interpolation.
@@ -78,18 +85,48 @@ export async function runEvaluation(env: Env, params: EvalParams) {
 		);
 		out.clone = { ok: clone.exitCode === 0, output: (clone.stdout + clone.stderr).slice(-500) };
 		if (out.clone.ok) {
+			// Post-submission hardening (review #2, L5): the clone URL embeds
+			// the fork's read token, which git persists in .git/config. Point
+			// the remote back at the unauthenticated URL NOW — before npm ci
+			// lifecycle scripts or any test run executes candidate code — so
+			// the live token is not sitting in the tree while that code runs.
+			await sandbox.exec(`cd /workspace/cand && git remote set-url origin ${remote} 2>&1`);
 			const install = await sandbox.exec(`cd /workspace/cand && npm ci --no-audit --no-fund 2>&1 | tail -3`);
 			out.install = { ok: install.exitCode === 0, output: (install.stdout + install.stderr).slice(-500) };
 			if (out.install.ok) {
-				const visible = await sandbox.exec(`cd /workspace/cand && npm test 2>&1 | tail -25`);
+				// Post-submission hardening (review #2, M7): run the suite
+				// directly with vitest instead of the candidate's own
+				// `npm test` script — scripts.test is candidate-definable
+				// ("test": "true" would have passed this gate without running
+				// anything). hasTestScript remains a static presence check.
+				const visible = await sandbox.exec(`cd /workspace/cand && npx vitest run 2>&1 | tail -25`);
 				out.visible = { ok: visible.exitCode === 0, output: (visible.stdout + visible.stderr).slice(-2000) };
 				// Held-out tests: agents never see these; they live only in the Worker env.
-				const b64 = btoa(env.HELD_OUT_TESTS);
+				// Post-submission hardening (review #2, H1 + I2): the file is
+				// staged OUTSIDE the candidate tree, in /workspace/heldout,
+				// under an evaluator-owned vitest config, and run with an
+				// explicit --config/--root there — the candidate's own
+				// vitest.config, setup files, and package.json never
+				// participate. The suite imports './src/store.js' relative to
+				// itself, so the harness exposes the candidate's src (and its
+				// installed node_modules, for the 'vitest' import) through
+				// symlinks; the held-out file itself never enters /workspace/cand.
+				// Base64 is computed over TextEncoder bytes: btoa() alone
+				// throws on any non-Latin1 character in the test source.
+				const toB64 = (s: string) => {
+					const bytes = new TextEncoder().encode(s);
+					let bin = '';
+					for (const b of bytes) bin += String.fromCharCode(b);
+					return btoa(bin);
+				};
+				const heldB64 = toB64(env.HELD_OUT_TESTS);
+				const heldConfig = `export default { test: { include: ['heldout.test.js'] } };\n`;
+				const heldConfigB64 = toB64(heldConfig);
 				const writeHeld = await sandbox.exec(
-					`echo '${b64}' | base64 -d > /workspace/cand/heldout.test.js && ls /workspace/cand/heldout.test.js`,
+					`mkdir -p /workspace/heldout && echo '${heldB64}' | base64 -d > /workspace/heldout/heldout.test.js && echo '${heldConfigB64}' | base64 -d > /workspace/heldout/vitest.config.mjs && ln -sfn /workspace/cand/src /workspace/heldout/src && ln -sfn /workspace/cand/node_modules /workspace/heldout/node_modules && ls /workspace/heldout/heldout.test.js`,
 				);
 				if (writeHeld.exitCode === 0) {
-					const held = await sandbox.exec(`cd /workspace/cand && npx vitest run heldout.test.js 2>&1 | tail -25`);
+					const held = await sandbox.exec(`cd /workspace/cand && npx vitest run --config /workspace/heldout/vitest.config.mjs --root /workspace/heldout 2>&1 | tail -25`);
 					out.heldOut = { ok: held.exitCode === 0, output: (held.stdout + held.stderr).slice(-2000) };
 				} else {
 					out.heldOut = { ok: false, output: 'could not stage held-out tests' };
@@ -153,9 +190,14 @@ export async function runEvaluation(env: Env, params: EvalParams) {
 	const undeclaredFiles = changedFiles.filter((f) => !inDeclaredScope(f));
 	const scopeCreep = scopeChecked ? undeclaredFiles.length > 0 : null;
 	// Candidate must never edit its own judge: flag diffs that touch test/spec paths.
-	const touchedTests = changedFiles.some(
-		(f) => f.startsWith('test/') || f.endsWith('.test.js') || f.includes('heldout'),
-	);
+	// Post-submission hardening (review #2, M4): tri-state, like scope_creep —
+	// when the scope check didn't run, this is null (UNVERIFIED), never a
+	// confident false. Decide treats null/absent as unverified (see api.ts).
+	const touchedTests = scopeChecked
+		? changedFiles.some(
+				(f) => f.startsWith('test/') || f.endsWith('.test.js') || f.includes('heldout'),
+			)
+		: null;
 	const specCommit = intentRow?.spec_commit ?? null;
 
 	const checks = {
@@ -247,7 +289,10 @@ export async function runEvaluation(env: Env, params: EvalParams) {
 			now(),
 		)
 		.run();
-	await env.DB.prepare(`UPDATE intents SET status = 'evaluated' WHERE id = (SELECT intent_id FROM candidates WHERE id = ?)`)
+	// Post-submission hardening (review #2, L4): conditional status update —
+	// a late-finishing evaluation must not regress an intent that has since
+	// advanced (decided/promoted). Only submitted/evaluated intents move.
+	await env.DB.prepare(`UPDATE intents SET status = 'evaluated' WHERE id = (SELECT intent_id FROM candidates WHERE id = ?) AND status IN ('submitted','evaluated')`)
 		.bind(candidate_id)
 		.run();
 	await ledger(env, 'evaluation.done', candidate_id, {

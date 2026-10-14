@@ -22,18 +22,39 @@ export async function ledger(
 	payload: unknown,
 ): Promise<void> {
 	// V17: hash chain for tamper detection
-	const at = now();
 	const payloadStr = JSON.stringify(payload);
-	const last: any = await env.DB.prepare(
-		`SELECT hash FROM ledger ORDER BY seq DESC LIMIT 1`
-	).first();
-	const prevHash = last?.hash ?? 'GENESIS';
-	const hashInput = `${prevHash}|${kind}|${ref_id ?? ''}|${payloadStr}|${at}`;
-	const hashBuf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(hashInput));
-	const hash = [...new Uint8Array(hashBuf)].map(b => b.toString(16).padStart(2, '0')).join('');
-	await env.DB.prepare(
-		`INSERT INTO ledger (kind, ref_id, payload, prev_hash, hash, at) VALUES (?, ?, ?, ?, ?, ?)`,
-	).bind(kind, ref_id, payloadStr, prevHash, hash, at).run();
+	// Post-submission hardening (review #2, M1): the append used to be a bare
+	// read-tip → compute → insert, so two concurrent writers could both build
+	// on the same prev_hash and silently fork the chain. The hash itself must
+	// be computed in JS (D1 SQL cannot SHA-256 the payload), so the append
+	// stays read-compute-insert — but schema.sql now carries a UNIQUE index
+	// on ledger(prev_hash): a fork attempt fails the insert instead of
+	// corrupting verifiability. On that violation we re-read the (new) tip
+	// and retry a bounded number of times; if it still cannot append, the
+	// error is thrown so the caller sees it — never a silent fork.
+	let lastError: unknown = null;
+	for (let attempt = 0; attempt < 3; attempt++) {
+		const at = now();
+		const last: any = await env.DB.prepare(
+			`SELECT hash FROM ledger ORDER BY seq DESC LIMIT 1`
+		).first();
+		const prevHash = last?.hash ?? 'GENESIS';
+		const hashInput = `${prevHash}|${kind}|${ref_id ?? ''}|${payloadStr}|${at}`;
+		const hashBuf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(hashInput));
+		const hash = [...new Uint8Array(hashBuf)].map(b => b.toString(16).padStart(2, '0')).join('');
+		try {
+			await env.DB.prepare(
+				`INSERT INTO ledger (kind, ref_id, payload, prev_hash, hash, at) VALUES (?, ?, ?, ?, ?, ?)`,
+			).bind(kind, ref_id, payloadStr, prevHash, hash, at).run();
+			return;
+		} catch (e: any) {
+			lastError = e;
+			const msg = String(e?.message ?? e);
+			if (!/unique|constraint/i.test(msg)) throw e;
+			// Lost the race for this prev_hash — loop re-reads the tip and retries.
+		}
+	}
+	throw lastError instanceof Error ? lastError : new Error(`ledger append failed: ${String(lastError)}`);
 }
 
 export async function getIntent(env: Env, id: string) {

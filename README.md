@@ -4,7 +4,7 @@
 
 Verdict is a prototype Git platform for the agent era, built on **Cloudflare Workers + Artifacts** for the [Build the Next-Gen Git Platform](https://www.cloudflare.com/git-competition/) competition.
 
-The core idea: instead of agents racing to push to the same branch and creating merge conflicts, each agent **declares its intent** (what it plans to change) *before* editing. Verdict provisions an **isolated Artifacts fork per intent**, runs **deterministic evaluations** (real test suites + held-out tests the agents never see) in isolated Cloudflare Sandbox containers, and presents the human with **one evidence-backed decision card per intent**. The human approves; the merge sequencer promotes via fast-forward only. Every decision lands in an **append-only ledger**, losing approaches are retained, and any promotion can be undone in one click.
+The core idea: instead of agents racing to push to the same branch and creating merge conflicts, each agent **declares its intent** (what it plans to change) *before* editing. Verdict provisions an **isolated Artifacts fork per intent**, runs **deterministic evaluations** (real test suites + held-out tests the agents never see) in isolated Cloudflare Sandbox containers, and presents the human with **one evidence-backed decision card per intent**. The human approves; the merge sequencer promotes via fast-forward only. Every decision lands in an **append-only ledger**, losing approaches are retained, and any promotion can be undone: the API mints a short-lived restore token, the operator force-pushes main back to the previous head, and Verdict verifies the restore before recording the undo as done.
 
 What Verdict deliberately does NOT do: claim semantic conflict detection (path overlap is a *risk badge*, not a conflict claim), let LLMs gate merges (deterministic tests decide; LLMs only explain), or auto-merge (humans approve every promotion).
 
@@ -16,14 +16,16 @@ The 44-second sizzle cut (with August v2 voiceover, music-only, 4K, and vertical
 
 ```
 Agent declares intent → Verdict provisions isolated fork (Artifacts)
-  → Agent pushes to its fork → submit → Queue → Sandbox eval
+  → Agent pushes to its fork → submit → Sandbox eval
+    (triggered in the submit request lifecycle; the queue consumer
+     re-dispatches as a secondary path)
   → Decision card (evidence: test results, held-out results)
   → Human approves → 60s promotion token → agent fast-forward pushes
-  → Promotion confirmed → append-only ledger → one-click undo
+  → Promotion confirmed → append-only ledger → undo (token + operator push + verify)
 ```
 
 - **Worker** (`src/`): REST API, intent registry, fork provisioning, merge sequencer, ledger.
-- **Queue** (`verdict-eval-q`): buffers submitted candidates for evaluation.
+- **Queue** (`verdict-eval-q`): receives submitted candidates; its consumer re-dispatches each evaluation to an internal endpoint as a secondary trigger. The primary trigger runs in the submit request lifecycle (`ctx.waitUntil`), which keeps the Sandbox binding in a fetch context.
 - **Sandbox** (`@cloudflare/sandbox`): isolated container per evaluation — clones the candidate, runs `npm ci`, runs visible tests, stages and runs held-out tests.
 - **D1** (`verdict-db`): intents, candidates, evaluations, decisions, promotions, ledger.
 - **UI** (`public/index.html`): single-file decision forge — declare intents, watch heat badges, review decision cards, approve, undo.
@@ -54,7 +56,7 @@ Agent declares intent → Verdict provisions isolated fork (Artifacts)
 4. Set secrets (held-out tests are never in the repo; agents cannot see them):
    ```bash
    wrangler secret put HELD_OUT_TESTS < your-heldout.test.js
-   wrangler secret put INTERNAL_SECRET   # any random string; guards the internal eval endpoint
+   wrangler secret put INTERNAL_SECRET   # any random string; guards ALL write endpoints (declare, fork, submit, decide, confirm, undo)
    ```
    Write your own held-out tests for the demo task — they should test the requirements in ways the visible tests do not, so agents cannot pass by overfitting to the visible suite.
 

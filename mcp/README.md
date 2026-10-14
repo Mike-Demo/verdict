@@ -19,10 +19,12 @@ Minimal [Model Context Protocol](https://modelcontextprotocol.io) server over st
     "verdict": {
       "command": "node",
       "args": ["/path/to/verdict/mcp/server.js"],
-      "env": { "VERDICT_API": "https://verdict.hey-demo-827.workers.dev" }
+      "env": { "VERDICT_API": "https://verdict.hey-demo-827.workers.dev", "VERDICT_SECRET": "<the Worker's INTERNAL_SECRET>" }
     }
   }
 }
 ```
 
 `VERDICT_API` defaults to the live prototype Worker.
+
+**Authentication:** all Verdict API *write* endpoints require the shared write secret (`x-verdict-secret` header, checked against the Worker's `INTERNAL_SECRET`). Set `VERDICT_SECRET` in the env above or `declare_intent` will fail with HTTP 401 — the server sends it automatically on POSTs when set. The read tools (`list_cards`, `get_ledger`) work without it.

@@ -2,11 +2,18 @@
 // Verdict MCP server (stdio) — minimal, zero dependencies.
 // Exposes: declare_intent, list_cards, get_ledger → proxied to the Verdict Worker API.
 // Configure: VERDICT_API (default https://verdict.hey-demo-827.workers.dev)
+//            VERDICT_SECRET — the Worker's write secret. REQUIRED for
+//            declare_intent: all API writes need the x-verdict-secret header
+//            (post-submission hardening, review #2 M6 — without it, writes 401).
+//            Reads (list_cards, get_ledger) work without it.
 
 const BASE = process.env.VERDICT_API || 'https://verdict.hey-demo-827.workers.dev';
+const SECRET = process.env.VERDICT_SECRET || '';
 
 async function api(path, opts = {}) {
-	const res = await fetch(BASE + path, { headers: { 'content-type': 'application/json' }, ...opts });
+	const headers = { 'content-type': 'application/json', ...(opts.headers || {}) };
+	if (opts.method === 'POST' && SECRET) headers['x-verdict-secret'] = SECRET;
+	const res = await fetch(BASE + path, { ...opts, headers });
 	const data = await res.json().catch(() => ({}));
 	if (!res.ok) throw new Error(`HTTP ${res.status}: ${data.error || data.reason || JSON.stringify(data)}`);
 	return data;
