@@ -10,6 +10,8 @@ What Verdict deliberately does NOT do: claim semantic conflict detection (path o
 
 ## Media
 
+**Demo video (9:30):** the full competition walkthrough — four agents declare intent on the same task, deterministic evaluations run, one candidate is stopped at the test-touch gate, a single decision is promoted to main and then undone, all recorded in the ledger. [Watch / download the submitted cut](https://github.com/Mike-Demo/verdict/releases/download/submission-video-v1/verdict-submission-live-vo.mp4) (release: [submission-video-v1](https://github.com/Mike-Demo/verdict/releases/tag/submission-video-v1)).
+
 The 44-second sizzle cut (with August v2 voiceover, music-only, 4K, and vertical editions) lives on the [media page](https://verdict.hey-demo-827.workers.dev/media) — watch in the browser or download from the [sizzle-media-v1 release](https://github.com/Mike-Demo/verdict/releases/tag/sizzle-media-v1).
 
 ## Architecture
