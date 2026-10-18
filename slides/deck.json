@@ -1,0 +1,246 @@
+{
+  "boltSlidesVersion": 1,
+  "deck": {
+    "title": "Verdict — Intent-led decision forge",
+    "transition": "fade",
+    "font": "space",
+    "accent": "#f59e0b"
+  },
+  "slides": [
+    {
+      "id": "s1",
+      "position": 0,
+      "layout": "cover",
+      "props": {
+        "kicker": "A decision forge for agent-built software",
+        "title": "Verdict",
+        "subtitle": "Agents declare intent. ==Evidence decides.== Humans approve.",
+        "foot": "github.com/Mike-Demo/verdict"
+      },
+      "background": {
+        "type": "gradient",
+        "from": "#120c03",
+        "to": "#06080d",
+        "angle": 160
+      },
+      "animation": "cascade",
+      "transition": null,
+      "nav": null,
+      "notes": "Verdict is a decision forge for software written by AI agents. The tagline is the whole thesis: intent from the agent, evidence decides, humans approve.",
+      "status": "none"
+    },
+    {
+      "id": "s2",
+      "position": 1,
+      "layout": "contrast",
+      "props": {
+        "kicker": "The problem",
+        "title": "Agents edit faster than anyone can review.",
+        "left": {
+          "label": "Today",
+          "title": "Merges are vibes-based",
+          "points": [
+            "Agents ship diffs faster than humans can read",
+            "Reviews sample a fraction of what lands",
+            "No account of why a change was accepted"
+          ]
+        },
+        "right": {
+          "label": "Unaccountable",
+          "title": "Trust without evidence",
+          "points": [
+            "Acceptance is a gut call, not a measurement",
+            "No record to audit when something breaks",
+            "Rolling back means untangling history by hand"
+          ]
+        }
+      },
+      "background": {
+        "type": "color",
+        "color": "var(--bg)"
+      },
+      "animation": "cascade",
+      "transition": null,
+      "nav": null,
+      "notes": "The gap: generation speed has exploded, review capacity has not. Merges happen on vibes and nobody can say afterwards why a change went in.",
+      "status": "none"
+    },
+    {
+      "id": "s3",
+      "position": 2,
+      "layout": "statement",
+      "props": {
+        "kicker": "The idea",
+        "title": "Before editing, the agent declares its ==intent==. Candidates compete. Tests decide.",
+        "body": "Candidate implementations face off in a tournament judged by deterministic evaluation and held-out tests. The LLM explains and ranks — ==it never decides.=="
+      },
+      "background": {
+        "type": "color",
+        "color": "var(--bg)"
+      },
+      "animation": "cascade",
+      "transition": null,
+      "nav": null,
+      "notes": "Flip review on its head: intent comes first, then a tournament of implementations scored by evidence. The model's job is explanation and ranking — the decision belongs to deterministic evaluation and, finally, the human.",
+      "status": "none"
+    },
+    {
+      "id": "s4",
+      "position": 3,
+      "layout": "steps",
+      "props": {
+        "kicker": "How it works",
+        "title": "Intent in, one decision out.",
+        "items": [
+          {
+            "title": "Declare intent",
+            "body": "The agent states what it will change before touching code"
+          },
+          {
+            "title": "Fork per agent",
+            "body": "Every candidate implementation gets its own sandbox"
+          },
+          {
+            "title": "Deterministic eval",
+            "body": "Held-out tests score each candidate the same way"
+          },
+          {
+            "title": "One decision card",
+            "body": "A single verdict per intent — the LLM explains and ranks, never decides"
+          },
+          {
+            "title": "Fast-forward-only merge",
+            "body": "A sequencer keeps history linear and replayable"
+          },
+          {
+            "title": "Ledger + undo",
+            "body": "Append-only decision record with one-click rollback"
+          }
+        ]
+      },
+      "background": {
+        "type": "color",
+        "color": "var(--bg)"
+      },
+      "animation": "cascade",
+      "transition": null,
+      "nav": null,
+      "notes": "Walk the pipeline left to right: intent declared up front, candidates forked and scored by the same held-out tests, a single decision card per intent, then a fast-forward-only merge recorded in an append-only ledger with one-click undo.",
+      "status": "none"
+    },
+    {
+      "id": "s5",
+      "position": 4,
+      "layout": "bento",
+      "props": {
+        "kicker": "Infrastructure",
+        "title": "Built on Cloudflare.",
+        "tiles": [
+          {
+            "k": "01",
+            "title": "Workers",
+            "body": "Edge runtime orchestrates tournaments and the merge sequencer",
+            "variant": "accent"
+          },
+          {
+            "k": "02",
+            "title": "Artifacts",
+            "body": "Candidate implementations live as immutable build artifacts"
+          },
+          {
+            "k": "03",
+            "title": "D1",
+            "body": "The append-only decision ledger — every verdict, permanently queryable"
+          }
+        ]
+      },
+      "background": {
+        "type": "color",
+        "color": "var(--bg)"
+      },
+      "animation": "cascade",
+      "transition": null,
+      "nav": null,
+      "notes": "Everything runs on Cloudflare: Workers drive the tournaments and the merge sequencer, Artifacts hold the candidate implementations, and D1 is the append-only ledger.",
+      "status": "none"
+    },
+    {
+      "id": "s6",
+      "position": 5,
+      "layout": "pillars",
+      "props": {
+        "title": "Key features.",
+        "items": [
+          {
+            "title": "The LLM never decides",
+            "body": "It explains and ranks; deterministic evaluation holds the pen"
+          },
+          {
+            "title": "One decision per intent",
+            "body": "A single verdict card — no silent competing merges"
+          },
+          {
+            "title": "Append-only ledger",
+            "body": "Every acceptance reason is permanent and auditable"
+          },
+          {
+            "title": "One-click undo",
+            "body": "Reverse any decision without rewriting history"
+          }
+        ]
+      },
+      "background": {
+        "type": "color",
+        "color": "var(--bg)"
+      },
+      "animation": "cascade",
+      "transition": null,
+      "nav": null,
+      "notes": "The four guarantees: the model never holds the pen, one verdict per intent, a ledger that cannot be rewritten, and undo that respects history.",
+      "status": "none"
+    },
+    {
+      "id": "s7",
+      "position": 6,
+      "layout": "bigNumber",
+      "props": {
+        "kicker": "Status",
+        "value": "Live",
+        "caption": "Built for the Cloudflare 'Build the next Git platform' challenge — submitted October 13, 2026",
+        "foot": "Live demo running now"
+      },
+      "background": {
+        "type": "color",
+        "color": "var(--bg)"
+      },
+      "animation": "cascade",
+      "transition": null,
+      "nav": null,
+      "notes": "Verdict is real: submitted October 13, 2026 to the Cloudflare 'Build the next Git platform' challenge, and the demo is running today.",
+      "status": "none"
+    },
+    {
+      "id": "s8",
+      "position": 7,
+      "layout": "cover",
+      "props": {
+        "kicker": "Agents declare intent. Evidence decides. Humans approve.",
+        "title": "Try the ==forge==.",
+        "subtitle": "Star, read the ledger spec, and run the live demo.",
+        "foot": "github.com/Mike-Demo/verdict"
+      },
+      "background": {
+        "type": "gradient",
+        "from": "#120c03",
+        "to": "#06080d",
+        "angle": 160
+      },
+      "animation": "cascade",
+      "transition": null,
+      "nav": null,
+      "notes": "Close with the call to action: the repo, the live demo, and the invitation to hold agents to evidence instead of vibes.",
+      "status": "none"
+    }
+  ],
+  "boltSlidesId": "11011050-f9d6-4d43-8a9e-3e43af51bbaf"
+}
