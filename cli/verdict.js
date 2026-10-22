@@ -5,7 +5,7 @@
 //   verdict cards
 //   verdict ledger
 //
-// Env: VERDICT_API (default https://verdict.hey-demo-827.workers.dev)
+// Env: VERDICT_API (default https://verdict.hey-demo-827.workers.dev), VERDICT_AGENT_SECRET
 
 const BASE = process.env.VERDICT_API || 'https://verdict.hey-demo-827.workers.dev';
 
@@ -25,7 +25,9 @@ function parseArgs(argv) {
 }
 
 async function api(path, opts = {}) {
-	const res = await fetch(BASE + path, { headers: { 'content-type': 'application/json' }, ...opts });
+	const headers = { 'content-type': 'application/json' };
+	if (process.env.VERDICT_AGENT_SECRET) headers['x-verdict-secret'] = process.env.VERDICT_AGENT_SECRET;
+	const res = await fetch(BASE + path, { ...opts, headers: { ...headers, ...opts.headers } });
 	const data = await res.json().catch(() => ({}));
 	if (!res.ok) {
 		console.error(`error: HTTP ${res.status} — ${data.error || data.reason || JSON.stringify(data)}`);

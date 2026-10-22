@@ -56,8 +56,10 @@ Agent declares intent → Verdict provisions isolated fork (Artifacts)
 4. Set secrets (held-out tests are never in the repo; agents cannot see them):
    ```bash
    wrangler secret put HELD_OUT_TESTS < your-heldout.test.js
-   wrangler secret put INTERNAL_SECRET   # any random string; guards the internal eval endpoint
+   wrangler secret put INTERNAL_SECRET  # distinct random agent-write secret; guards agent writes and internal eval
+   wrangler secret put HUMAN_SECRET     # distinct random human-only secret for approval and undo
    ```
+   Keep `HUMAN_SECRET` only with human operators. Do not give it to agents or configure it in agent-facing MCP/CLI clients. The UI prompts separately for the agent-write and human-approval secrets. The CLI and MCP server use only `VERDICT_AGENT_SECRET` when configured.
    Write your own held-out tests for the demo task — they should test the requirements in ways the visible tests do not, so agents cannot pass by overfitting to the visible suite.
 
    > [!CAUTION]
@@ -72,7 +74,7 @@ Agent declares intent → Verdict provisions isolated fork (Artifacts)
 1. Declare two or three intents (agents) with overlapping `paths` — watch the heat badges.
 2. Each agent: `POST /api/intents/<id>/fork` → clone with the returned token → implement → push → `POST /api/intents/<id>/submit {"commit": "<sha>"}`.
 3. Evaluations run automatically (Sandbox: install, visible tests, held-out tests).
-4. Review decision cards at the UI. Approve one: `POST /api/decide` → use the 60s token to fast-forward-push base main → `POST /api/promotions/confirm`.
+4. Review decision cards at the UI. Approve one with the human secret: `POST /api/decide` → use the 60s token to fast-forward-push base main → `POST /api/promotions/confirm`.
 5. Undo anytime via the UI.
 
 ## Key design decisions

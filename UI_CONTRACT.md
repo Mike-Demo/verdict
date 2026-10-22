@@ -2,6 +2,10 @@
 
 Base: same origin as the UI. All JSON.
 
+Write endpoints require `x-verdict-secret`. Declare/fork/submit use the agent
+write secret (`INTERNAL_SECRET`); decide, promotion confirmation, and undo
+endpoints require the distinct human-only `HUMAN_SECRET`.
+
 ## Endpoints
 
 ### POST /api/intents — declare intent
