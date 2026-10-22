@@ -20,7 +20,7 @@ The 44-second sizzle cut (with August v2 voiceover, music-only, 4K, and vertical
 Agent declares intent → Verdict provisions isolated fork (Artifacts)
   → Agent pushes to its fork → submit → Queue → Sandbox eval
   → Decision card (evidence: test results, held-out results)
-  → Human approves → 60s promotion token → agent fast-forward pushes
+  → Human approves → Worker applies the evaluated commit to base main
   → Promotion confirmed → append-only ledger → one-click undo
 ```
 
@@ -49,6 +49,7 @@ Agent declares intent → Verdict provisions isolated fork (Artifacts)
    ```bash
    wrangler d1 execute verdict-db --file schema.sql --remote
    ```
+   Re-apply this schema when upgrading an existing deployment to install the promotion idempotency index.
 3. Create the queue:
    ```bash
    wrangler queues create verdict-eval-q
@@ -72,7 +73,7 @@ Agent declares intent → Verdict provisions isolated fork (Artifacts)
 1. Declare two or three intents (agents) with overlapping `paths` — watch the heat badges.
 2. Each agent: `POST /api/intents/<id>/fork` → clone with the returned token → implement → push → `POST /api/intents/<id>/submit {"commit": "<sha>"}`.
 3. Evaluations run automatically (Sandbox: install, visible tests, held-out tests).
-4. Review decision cards at the UI. Approve one: `POST /api/decide` → use the 60s token to fast-forward-push base main → `POST /api/promotions/confirm`.
+4. Review decision cards at the UI. Approve one: `POST /api/decide` applies the evaluated commit to base `main` inside the Worker; confirm it with `POST /api/promotions/confirm`.
 5. Undo anytime via the UI.
 
 ## Key design decisions
