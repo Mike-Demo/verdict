@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS promotions (
   at INTEGER NOT NULL,
   undone INTEGER NOT NULL DEFAULT 0
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_promotions_decision_id ON promotions(decision_id);
 
 -- Append-only decision ledger. Rows are never updated or deleted.
 CREATE TABLE IF NOT EXISTS ledger (

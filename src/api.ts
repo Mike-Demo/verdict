@@ -429,11 +429,16 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 				}, 409);
 			}
 			const promotionId = uid('promo');
-			await env.DB.prepare(
-				`INSERT INTO promotions (id, base_repo, prev_head, new_head, candidate_id, decision_id, at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			const inserted = await env.DB.prepare(
+				`INSERT INTO promotions (id, base_repo, prev_head, new_head, candidate_id, decision_id, at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(decision_id) DO NOTHING`,
 			)
 				.bind(promotionId, env.BASE_REPO, decisionPayload.mainHead, mainHead, candidate.id, decision.id, now())
 				.run();
+			if ((inserted.meta?.changes ?? 0) === 0) {
+				const existing: any = await env.DB.prepare(`SELECT id, prev_head, new_head FROM promotions WHERE decision_id = ?`).bind(decision.id).first();
+				return json({ confirmed: true, promotion_id: existing.id, prev_head: existing.prev_head, new_head: existing.new_head, note: 'already confirmed' });
+			}
 			await env.DB.prepare(`UPDATE intents SET status = 'promoted' WHERE id = ?`).bind(decision.intent_id).run();
 			await ledger(env, 'promotion.done', promotionId, { promotion_id: promotionId, decision_id: decision.id, prev_head: decisionPayload.mainHead, new_head: mainHead });
 			return json({ confirmed: true, promotion_id: promotionId, prev_head: decisionPayload.mainHead, new_head: mainHead });
@@ -452,6 +457,9 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 		try {
 			baseRepo = await env.ARTIFACTS.get(env.BASE_REPO);
 			const currentHead = (await baseRepo.log({ ref: 'main', limit: 1 }))[0]?.hash;
+			if (currentHead === promo.prev_head) {
+				return json({ restored: true, restore_ref: promo.prev_head });
+			}
 			if (currentHead !== promo.new_head) {
 				return json({ undone: false, reason: 'main no longer matches this promotion', current_head: currentHead, expected: promo.new_head }, 409);
 			}
@@ -475,7 +483,7 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 		const promo: any = await env.DB.prepare(`SELECT * FROM promotions WHERE id = ?`).bind(body.promotion_id).first();
 		if (!promo) return json({ error: 'promotion not found' }, 404);
 		if (promo.base_repo !== env.BASE_REPO) return json({ error: 'promotion belongs to another repository' }, 409);
-		if (promo.undone) return json({ error: 'already undone' }, 409);
+		if (promo.undone) return json({ confirmed: true, note: 'already confirmed' });
 		let baseRepo: any = null;
 		try {
 			baseRepo = await env.ARTIFACTS.get(env.BASE_REPO);

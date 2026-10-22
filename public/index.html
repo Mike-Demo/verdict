@@ -354,6 +354,7 @@
   var ui = {
     rationales: {},   // intentId -> rationale text (survives re-render)
     decisions: {},    // intentId -> { decision_id, mainHead, forkHead, promoted, confirmed }
+    undoPending: {},  // promotionId -> true until the restore is confirmed
     last: { intents: "", cards: "", ledger: "" },
     apiOk: false
   };
@@ -661,6 +662,8 @@
       var undoHtml;
       if (undone) {
         undoHtml = '<div class="notice info">Undo confirmed — main is restored.</div>';
+      } else if (ui.undoPending[pid]) {
+        undoHtml = '<button class="btn danger small" data-action="undo-confirm" data-promotion="' + esc(pid) + '">Retry undo confirmation</button>';
       } else {
         undoHtml = '<button class="btn danger small" data-action="undo" data-promotion="' + esc(pid) + '">Undo</button>';
       }
@@ -1014,6 +1017,27 @@
     }
   });
 
+  function confirmUndo(pid, button) {
+    button.disabled = true;
+    api("/api/undo/confirm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ promotion_id: pid })
+    }).then(function (r) {
+      button.disabled = false;
+      if (r.ok && r.data.confirmed) {
+        delete ui.undoPending[pid];
+        poll();
+      } else {
+        var reason = (r.data && (r.data.reason || r.data.error)) || ("HTTP " + r.status);
+        notice("promos-notices", "Restore ran but confirmation failed: " + reason);
+      }
+    }).catch(function () {
+      button.disabled = false;
+      notice("promos-notices", "Restore ran but confirmation failed — retry confirmation.");
+    });
+  }
+
   document.addEventListener("click", function (ev) {
     var t = ev.target.closest ? ev.target.closest("[data-action]") : null;
     if (!t) return;
@@ -1097,23 +1121,19 @@
       }).then(function (r) {
         t.disabled = false;
         if (r.ok && r.data.restored) {
-          api("/api/undo/confirm", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ promotion_id: pid })
-          }).then(function (confirmed) {
-            if (confirmed.ok && confirmed.data.confirmed) {
-              poll();
-            } else {
-              var confirmReason = (confirmed.data && (confirmed.data.reason || confirmed.data.error)) || ("HTTP " + confirmed.status);
-              notice("promos-notices", "Restore ran but confirmation failed: " + confirmReason);
-            }
-          }).catch(function () { notice("promos-notices", "Restore ran but confirmation failed — retry confirmation."); });
+          ui.undoPending[pid] = true;
+          t.textContent = "Retry undo confirmation";
+          t.setAttribute("data-action", "undo-confirm");
+          confirmUndo(pid, t);
         } else {
           var reason = (r.data && (r.data.reason || r.data.error)) || ("HTTP " + r.status);
           notice("promos-notices", "Undo failed: " + reason);
         }
       }).catch(function () { t.disabled = false; notice("promos-notices", "Request failed — is the API up?"); });
+      return;
+    }
+    if (action === "undo-confirm") {
+      confirmUndo(t.getAttribute("data-promotion"), t);
       return;
     }
   });

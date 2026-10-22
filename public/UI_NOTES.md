@@ -26,18 +26,18 @@ HTML-escaped.
    push command is returned to the UI. The UI calls the confirmation endpoints
    only after the corresponding ref update succeeds.
 
-5. **Rationale is required client-side** before Promote (contract marks it required
+4. **Rationale is required client-side** before Promote (contract marks it required
    in the request; the UI blocks empty rationale with an inline nudge).
 
-6. **Held-out display:** `evaluation.held_out_pass === null` renders as "pending";
+5. **Held-out display:** `evaluation.held_out_pass === null` renders as "pending";
    `true`/`false` render as pass/fail. `evaluation.checks` keys are rendered in the
    fixed contract order; unknown keys fall back to the raw key name.
 
-7. **Heat badge** follows the contract text: 0 → "no overlap" (grey), 1 → "1 overlap"
+6. **Heat badge** follows the contract text: 0 → "no overlap" (grey), 1 → "1 overlap"
    (amber), 2+ → "N overlaps" (red).
 
-8. **Polling resilience:** if any of the three GETs fails, a slim "API unreachable"
+7. **Polling resilience:** if any of the three GETs fails, a slim "API unreachable"
    banner shows and polling continues; sections keep their last rendered state.
 
-9. **Re-render focus guard:** if the user is typing in a rationale textarea when a
+8. **Re-render focus guard:** if the user is typing in a rationale textarea when a
    poll returns, that render pass is skipped so focus/text is not lost.
