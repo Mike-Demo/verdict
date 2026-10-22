@@ -1,6 +1,7 @@
 // Verdict API: intents, forks, decision cards, merge sequencer, ledger, undo.
 import { Env, ledger, now, uid, getIntent, activeIntents, heatFor, parsePaths } from './db';
 import { runEvaluation } from './evaluate';
+import { getSandbox } from '@cloudflare/sandbox';
 
 const json = (data: unknown, status = 200) =>
 	new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } });
@@ -8,6 +9,64 @@ const json = (data: unknown, status = 200) =>
 async function disposeAll(_handles: any[]) {
 	// NOTE: do NOT call Symbol.asyncDispose on Artifacts handles — it can
 	// crash the isolate with an uncatchable 1101. Handles are GC'd.
+}
+
+function shellQuote(value: string): string {
+	return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function artifactsRemote(env: Env, repo: string, token: string): string {
+	const host = env.ACCOUNT_HOST;
+	const namespace = env.NAMESPACE;
+	if (
+		typeof host !== 'string' || !/^[a-z0-9.-]+$/i.test(host) ||
+		typeof namespace !== 'string' || !namespace.split('/').every((part: string) => /^[a-z0-9._-]+$/i.test(part)) ||
+		typeof repo !== 'string' || !/^[a-z0-9._-]+$/i.test(repo)
+	) {
+		throw new Error('invalid Artifacts repository configuration');
+	}
+	const tokenValue = token.split('?expires=')[0];
+	if (!tokenValue) throw new Error('missing Artifacts token');
+	return `https://x:${encodeURIComponent(tokenValue)}@${host}/git/${namespace}/${repo}.git`;
+}
+
+async function updateMain(
+	env: Env,
+	sourceRepo: string,
+	sourceHead: string,
+	targetHead: string,
+	expectedMainHead: string,
+	requireFastForward: boolean,
+): Promise<void> {
+	const fullSha = /^[0-9a-f]{40}$/i;
+	if (![sourceHead, targetHead, expectedMainHead].every((sha) => fullSha.test(sha))) {
+		throw new Error('invalid repository head');
+	}
+	let baseRepo: any = null;
+	let source: any = null;
+	try {
+		baseRepo = await env.ARTIFACTS.get(env.BASE_REPO);
+		source = sourceRepo === env.BASE_REPO ? baseRepo : await env.ARTIFACTS.get(sourceRepo);
+		const writeToken = (await baseRepo.createToken('write', 60)).plaintext;
+		const sourceToken = sourceRepo === env.BASE_REPO
+			? writeToken
+			: (await source.createToken('read', 60)).plaintext;
+		const baseRemote = artifactsRemote(env, env.BASE_REPO, writeToken);
+		const sourceRemote = artifactsRemote(env, sourceRepo, sourceToken);
+		const sandbox = getSandbox(env.SANDBOX, `ref-update-${uid('git')}`);
+		const ancestryCheck = requireFastForward
+			? ` && git -C /workspace/ref-update merge-base --is-ancestor ${expectedMainHead} ${targetHead}`
+			: '';
+		const result: any = await sandbox.exec(
+			`rm -rf /workspace/ref-update && GIT_TERMINAL_PROMPT=0 git clone --quiet --single-branch --branch main ${shellQuote(sourceRemote)} /workspace/ref-update >/dev/null 2>&1` +
+			` && test "$(git -C /workspace/ref-update rev-parse HEAD)" = ${sourceHead}` +
+			ancestryCheck +
+			` && GIT_TERMINAL_PROMPT=0 git -C /workspace/ref-update push --quiet --force-with-lease=refs/heads/main:${expectedMainHead} ${shellQuote(baseRemote)} ${targetHead}:refs/heads/main >/dev/null 2>&1`,
+		);
+		if (result.exitCode !== 0) throw new Error('main changed or approved ref update failed');
+	} finally {
+		await disposeAll([source, baseRepo]);
+	}
 }
 
 export async function handleApi(req: Request, env: Env, url: URL, ctx?: ExecutionContext): Promise<Response> {
@@ -230,7 +289,7 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 		return json(cards);
 	}
 
-	// --- Human decision + merge sequencer: FF check, mint 60s promotion token ---
+	// --- Human decision + merge sequencer: update base main to the approved commit ---
 	if (method === 'POST' && path === '/api/decide') {
 		const body = (await req.json()) as { intent_id: string; candidate_id: string; rationale?: string };
 		const intent: any = await getIntent(env, body.intent_id);
@@ -310,7 +369,7 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 					409,
 				);
 			}
-			const token = await baseRepo.createToken('write', 60);
+			await updateMain(env, candidate.repo, forkHead, forkHead, mainHead, true);
 			const decisionId = uid('dec');
 			await env.DB.prepare(
 				`INSERT INTO decisions (id, intent_id, winner_candidate_id, rationale, decided_at) VALUES (?, ?, ?, ?, ?)`,
@@ -326,13 +385,16 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 				mainHead,
 				forkHead,
 			});
-			return json({ decision_id: decisionId, eligible: true, mainHead, forkHead, promotion_token: token.plaintext, expires_in: 60 });
+			return json({ decision_id: decisionId, eligible: true, mainHead, forkHead, promoted: true });
+		} catch {
+			console.error('[promotion] ref update failed');
+			return json({ eligible: false, reason: 'approved ref update failed or main changed' }, 409);
 		} finally {
 			await disposeAll([forkRepo, baseRepo]);
 		}
 	}
 
-	// --- Confirm a promotion after the agent fast-forward pushes ---
+	// --- Confirm the Worker-executed promotion ---
 	if (method === 'POST' && path === '/api/promotions/confirm') {
 		const body = (await req.json()) as { decision_id: string };
 		const decision: any = await env.DB.prepare(`SELECT * FROM decisions WHERE id = ?`).bind(body.decision_id).first();
@@ -352,59 +414,55 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 			return json({ error: 'no evaluation found for candidate' }, 409);
 		}
 		let baseRepo: any = null;
-		let forkRepo: any = null;
 		try {
 			baseRepo = await env.ARTIFACTS.get(env.BASE_REPO);
-			forkRepo = await env.ARTIFACTS.get(candidate.repo);
 			const mainHead = (await baseRepo.log({ ref: 'main', limit: 1 }))[0]?.hash;
-			const forkHead = (await forkRepo.log({ ref: 'main', limit: 1 }))[0]?.hash;
-			if (mainHead !== forkHead) {
-				return json({ confirmed: false, reason: 'main has not advanced to the candidate head', mainHead, forkHead }, 409);
-			}
-			// Must match the evaluated commit — prevents post-eval push attacks
-			if (mainHead !== evaluatedCommit) {
+			const decisionPayload: any = JSON.parse(
+				(await env.DB.prepare(`SELECT payload FROM ledger WHERE kind = 'decision.made' AND ref_id = ?`).bind(decision.id).first() as any)?.payload ?? '{}',
+			);
+			if (mainHead !== evaluatedCommit || mainHead !== decisionPayload.forkHead) {
 				return json({
 					confirmed: false,
-					reason: 'main head does not match evaluated commit',
-					guidance: 'The promoted commit differs from what was evaluated. This is a security violation.',
+					reason: 'main head does not match the approved commit',
 					main_head: mainHead,
 					evaluated_commit: evaluatedCommit,
 				}, 409);
 			}
-			const prev = JSON.parse((await env.DB.prepare(`SELECT payload FROM ledger WHERE kind = 'decision.made' AND ref_id = ?`).bind(decision.id).first() as any)?.payload ?? '{}');
 			const promotionId = uid('promo');
 			await env.DB.prepare(
 				`INSERT INTO promotions (id, base_repo, prev_head, new_head, candidate_id, decision_id, at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 			)
-				.bind(promotionId, env.BASE_REPO, prev.mainHead, mainHead, candidate.id, decision.id, now())
+				.bind(promotionId, env.BASE_REPO, decisionPayload.mainHead, mainHead, candidate.id, decision.id, now())
 				.run();
 			await env.DB.prepare(`UPDATE intents SET status = 'promoted' WHERE id = ?`).bind(decision.intent_id).run();
-			await ledger(env, 'promotion.done', promotionId, { decision_id: decision.id, prev_head: prev.mainHead, new_head: mainHead });
-			return json({ confirmed: true, promotion_id: promotionId, prev_head: prev.mainHead, new_head: mainHead });
+			await ledger(env, 'promotion.done', promotionId, { promotion_id: promotionId, decision_id: decision.id, prev_head: decisionPayload.mainHead, new_head: mainHead });
+			return json({ confirmed: true, promotion_id: promotionId, prev_head: decisionPayload.mainHead, new_head: mainHead });
 		} finally {
-			await disposeAll([forkRepo, baseRepo]);
+			await disposeAll([baseRepo]);
 		}
 	}
 
-	// --- One-click undo: mint a token; the operator push restores prev_head ---
+	// --- One-click undo: restore main to the recorded previous head ---
 	if (method === 'POST' && path === '/api/undo') {
 		const body = (await req.json()) as { promotion_id: string };
 		const promo: any = await env.DB.prepare(`SELECT * FROM promotions WHERE id = ?`).bind(body.promotion_id).first();
 		if (!promo || promo.undone) return json({ error: 'promotion not found or already undone' }, 404);
+		if (promo.base_repo !== env.BASE_REPO) return json({ error: 'promotion belongs to another repository' }, 409);
 		let baseRepo: any = null;
 		try {
 			baseRepo = await env.ARTIFACTS.get(env.BASE_REPO);
-			const token = await baseRepo.createToken('write', 300);
-			// N4 fix: don't mark undone here — only in /api/undo/confirm after verified restore.
-			// This allows retry if the push fails or token expires.
-			await ledger(env, 'undo.done', promo.id, { prev_head: promo.prev_head, restored_to: promo.prev_head });
+			const currentHead = (await baseRepo.log({ ref: 'main', limit: 1 }))[0]?.hash;
+			if (currentHead !== promo.new_head) {
+				return json({ undone: false, reason: 'main no longer matches this promotion', current_head: currentHead, expected: promo.new_head }, 409);
+			}
+			await updateMain(env, env.BASE_REPO, promo.new_head, promo.prev_head, promo.new_head, false);
 			return json({
-				undone: true,
-				restore_token: token.plaintext,
-				expires_in: 300,
+				restored: true,
 				restore_ref: promo.prev_head,
-				note: 'Force-push main back to restore_ref using the token, then POST /api/undo/confirm with {promotion_id} to verify.',
 			});
+		} catch {
+			console.error('[undo] ref update failed');
+			return json({ undone: false, reason: 'restore failed or main changed' }, 409);
 		} finally {
 			await disposeAll([baseRepo]);
 		}
@@ -416,6 +474,7 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 		if (!body.promotion_id) return json({ error: 'promotion_id required' }, 400);
 		const promo: any = await env.DB.prepare(`SELECT * FROM promotions WHERE id = ?`).bind(body.promotion_id).first();
 		if (!promo) return json({ error: 'promotion not found' }, 404);
+		if (promo.base_repo !== env.BASE_REPO) return json({ error: 'promotion belongs to another repository' }, 409);
 		if (promo.undone) return json({ error: 'already undone' }, 409);
 		let baseRepo: any = null;
 		try {
@@ -424,8 +483,9 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 			if (!mainLog.length) return json({ error: 'cannot read main' }, 500);
 			const currentHead = mainLog[0].hash;
 			if (currentHead === promo.prev_head) {
-				// N4 fix: mark undone only here, after verified restore
-				await env.DB.prepare(`UPDATE promotions SET undone = 1 WHERE id = ?`).bind(promo.id).run();
+				const updated = await env.DB.prepare(`UPDATE promotions SET undone = 1 WHERE id = ? AND undone = 0`).bind(promo.id).run();
+				if ((updated.meta?.changes ?? 0) === 0) return json({ confirmed: true, head: currentHead, note: 'already confirmed' });
+				await ledger(env, 'undo.done', promo.id, { prev_head: promo.prev_head, restored_to: currentHead });
 				await ledger(env, 'undo.confirmed', promo.id, { restored_to: currentHead });
 				return json({ confirmed: true, head: currentHead });
 			}

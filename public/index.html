@@ -350,13 +350,10 @@
 <script>
 (function () {
   "use strict";
-  var HOST = "827e5ee14288e20217417d7e2463d88d.artifacts.cloudflare.net";
-  var BASE_REPO = "verdict-prototype/sample";
 
   var ui = {
     rationales: {},   // intentId -> rationale text (survives re-render)
-    decisions: {},    // intentId -> { decision_id, promotion_token, mainHead, forkHead, expires_in, confirmed }
-    undos: {},        // promotionId -> { restore_token, restore_ref }
+    decisions: {},    // intentId -> { decision_id, mainHead, forkHead, promoted, confirmed }
     last: { intents: "", cards: "", ledger: "" },
     apiOk: false
   };
@@ -550,13 +547,9 @@
       var actionHtml;
       if (dec && dec.confirmed) {
         actionHtml = '<div class="notice info" style="margin:14px 0 0"><span>Promoted — main is now at <span class="mono">' + esc(short(dec.new_head)) + '</span>. See Promotions below to undo.</span></div>';
-      } else if (dec && dec.promotion_token) {
-        var cmd = "git push https://x:" + dec.promotion_token + "@" + HOST + "/git/" + BASE_REPO + ".git " + dec.forkHead + ":main";
+      } else if (dec && dec.promoted) {
         actionHtml =
-          '<div class="token-note">Gates passed and candidate is rebased. Hand this to the winning agent — the token expires in ' + esc(String(dec.expires_in || 60)) + 's.</div>' +
-          '<div class="cmd-block" id="cmd-' + esc(intentId) + '"><span class="lbl">agent push command</span>' +
-            '<button class="btn small ghost copy-btn" data-action="copy" data-target="cmd-' + esc(intentId) + '">copy</button>' +
-            '<span class="cmd-text">' + esc(cmd) + "</span></div>" +
+          '<div class="notice info" style="margin:14px 0 0"><span>Verdict applied the approved commit to main. Confirm to record the promotion.</span></div>' +
           '<button class="btn primary" data-action="confirm" data-intent="' + esc(intentId) + '" data-decision="' + esc(dec.decision_id) + '">Confirm promotion</button>';
       } else {
         var rat = ui.rationales[intentId] || "";
@@ -622,7 +615,9 @@
       case "promotion.done":
         return "Promoted — " + strong(short(p.prev_head)) + " → " + strong(short(p.new_head));
       case "undo.done":
-        return "Undone — main restored to " + strong(short(p.restore_ref || e.ref_id));
+        return "Undone — main restored to " + strong(short(p.restored_to || p.restore_ref || e.ref_id));
+      case "undo.confirmed":
+        return "Undo verified — main is at " + strong(short(p.restored_to || e.ref_id));
       default:
         return esc(e.kind || "event") + " — " + esc(e.ref_id || "");
     }
@@ -660,13 +655,12 @@
     el.innerHTML = promos.map(function (e) {
       var p = e.payload || {};
       var pid = p.promotion_id || e.ref_id || String(e.seq);
-      var undo = ui.undos[pid];
+      var undone = (ledger || []).some(function (entry) {
+        return entry.kind === "undo.confirmed" && entry.ref_id === pid;
+      });
       var undoHtml;
-      if (undo) {
-        var cmd = "git push --force https://x:" + undo.restore_token + "@" + HOST + "/git/" + BASE_REPO + ".git " + undo.restore_ref + ":main";
-        undoHtml = '<div class="cmd-block" id="undo-' + esc(pid) + '"><span class="lbl">restore command — force-push main back</span>' +
-          '<button class="btn small ghost copy-btn" data-action="copy" data-target="undo-' + esc(pid) + '">copy</button>' +
-          '<span class="cmd-text">' + esc(cmd) + "</span></div>";
+      if (undone) {
+        undoHtml = '<div class="notice info">Undo confirmed — main is restored.</div>';
       } else {
         undoHtml = '<button class="btn danger small" data-action="undo" data-promotion="' + esc(pid) + '">Undo</button>';
       }
@@ -791,7 +785,7 @@
     var kindColors = {
       "intent.declared": "#6aa8e0", "fork.created": "#5fb98a",
       "candidate.submitted": "#f48120", "evaluation.done": "#b48ae0",
-      "decision.made": "#f48120", "promotion.done": "#5fb98a", "undo.done": "#dd5f5f"
+      "decision.made": "#f48120", "promotion.done": "#5fb98a", "undo.done": "#dd5f5f", "undo.confirmed": "#dd5f5f"
     };
     container.innerHTML = scrubberData.map(function (e, i) {
       var pct = ((e.at - minT) / span * 100).toFixed(1);
@@ -825,7 +819,8 @@
       case "evaluation.done": desc = "Evaluation: " + (p.pass ? "PASS" : "FAIL") + " — " + esc(p.summary || ""); break;
       case "decision.made": desc = "Decision: " + esc(p.rationale || "no rationale").slice(0, 120); break;
       case "promotion.done": desc = "Promoted: " + esc((p.prev_head || "").slice(0, 8)) + " → " + esc((p.new_head || "").slice(0, 8)); break;
-      case "undo.done": desc = "Undo: restored " + esc((p.restored || "").slice(0, 8)); break;
+      case "undo.done":
+      case "undo.confirmed": desc = "Undo: restored " + esc((p.restored_to || "").slice(0, 8)); break;
       default: desc = e.kind;
     }
     detail.innerHTML = '<strong style="color:var(--amber);">' + esc(timeStr) + '</strong> · ' + desc +
@@ -1048,13 +1043,12 @@
         if (r.ok) {
           ui.decisions[intentId] = {
             decision_id: r.data.decision_id,
-            promotion_token: r.data.promotion_token,
             mainHead: r.data.mainHead,
             forkHead: r.data.forkHead,
-            expires_in: r.data.expires_in,
+            promoted: r.data.promoted,
             confirmed: false
           };
-          ui.last.cards = ""; // force re-render to show the command
+          ui.last.cards = "";
           poll();
         } else {
           var d = r.data || {};
@@ -1088,7 +1082,7 @@
           poll();
         } else {
           var reason = (r.data && (r.data.reason || r.data.error)) || ("HTTP " + r.status);
-          notice("cards-notices", "Confirm failed: " + reason + " — make sure the agent push completed first.");
+          notice("cards-notices", "Confirm failed: " + reason);
         }
       }).catch(function () { t.disabled = false; notice("cards-notices", "Request failed — is the API up?"); });
       return;
@@ -1102,9 +1096,19 @@
         body: JSON.stringify({ promotion_id: pid })
       }).then(function (r) {
         t.disabled = false;
-        if (r.ok && r.data.undone) {
-          ui.undos[pid] = { restore_token: r.data.restore_token, restore_ref: r.data.restore_ref };
-          poll();
+        if (r.ok && r.data.restored) {
+          api("/api/undo/confirm", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ promotion_id: pid })
+          }).then(function (confirmed) {
+            if (confirmed.ok && confirmed.data.confirmed) {
+              poll();
+            } else {
+              var confirmReason = (confirmed.data && (confirmed.data.reason || confirmed.data.error)) || ("HTTP " + confirmed.status);
+              notice("promos-notices", "Restore ran but confirmation failed: " + confirmReason);
+            }
+          }).catch(function () { notice("promos-notices", "Restore ran but confirmation failed — retry confirmation."); });
         } else {
           var reason = (r.data && (r.data.reason || r.data.error)) || ("HTTP " + r.status);
           notice("promos-notices", "Undo failed: " + reason);

@@ -21,15 +21,10 @@ HTML-escaped.
    `payload.new_head`, `payload.restore_ref`) and falls back to `ref_id`/kind name.
    `at` is parsed as an ISO string or epoch seconds.
 
-3. **`POST /api/decide` response.** Uses exactly the contract fields:
-   `decision_id`, `promotion_token`, `mainHead`, `forkHead`, `expires_in`.
-   The agent push command is rendered as:
-   `git push https://x:<promotion_token>@827e5ee14288e20217417d7e2463d88d.artifacts.cloudflare.net/git/verdict-prototype/sample.git <forkHead>:main`
-   (base remote host/repo are hardcoded per the task brief — the contract does not
-   return a base remote URL).
-
-4. **Undo command** uses `git push --force` with `restore_token` / `restore_ref`
-   from `POST /api/undo`, same hardcoded host/repo.
+3. **Promotion and undo writes.** The Worker applies approved promotions and
+   restores using its Artifacts binding; no base-repository write token or
+   push command is returned to the UI. The UI calls the confirmation endpoints
+   only after the corresponding ref update succeeds.
 
 5. **Rationale is required client-side** before Promote (contract marks it required
    in the request; the UI blocks empty rationale with an inline nudge).

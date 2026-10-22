@@ -9,6 +9,8 @@ export interface Env {
 	HELD_OUT_TESTS: string;
 	INTERNAL_SECRET: string;
 	BASE_REPO: string;
+	ACCOUNT_HOST: string;
+	NAMESPACE: string;
 }
 
 export const now = () => Math.floor(Date.now() / 1000);
