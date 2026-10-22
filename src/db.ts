@@ -8,6 +8,7 @@ export interface Env {
 	AI: any;
 	HELD_OUT_TESTS: string;
 	INTERNAL_SECRET: string;
+	HUMAN_SECRET?: string;
 	BASE_REPO: string;
 }
 

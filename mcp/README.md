@@ -19,10 +19,15 @@ Minimal [Model Context Protocol](https://modelcontextprotocol.io) server over st
     "verdict": {
       "command": "node",
       "args": ["/path/to/verdict/mcp/server.js"],
-      "env": { "VERDICT_API": "https://verdict.hey-demo-827.workers.dev" }
+      "env": {
+        "VERDICT_API": "https://verdict.hey-demo-827.workers.dev",
+        "VERDICT_AGENT_SECRET": "<agent-write-secret>"
+      }
     }
   }
 }
 ```
 
 `VERDICT_API` defaults to the live prototype Worker.
+`VERDICT_AGENT_SECRET` is the agent-write credential used for intent declarations.
+Never configure the human-only `HUMAN_SECRET` in an agent-facing MCP client.

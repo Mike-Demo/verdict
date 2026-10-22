@@ -14,14 +14,23 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 	const path = url.pathname;
 	const method = req.method;
 
-	// V2 fix: require shared secret on all write endpoints.
-	// The UI prompts for it once and stores in sessionStorage.
+	// Require the agent secret for agent writes and a distinct human secret
+	// for approval and undo operations.
 	// Copilot audit fix: fail LOUD if INTERNAL_SECRET is not configured (not silent 401)
 	if (!env.INTERNAL_SECRET) {
 		console.error('[verdict] FATAL: INTERNAL_SECRET is not configured');
 	}
-	const requireAuth = () => {
+	const requireAuth = (human = false) => {
 		const secret = req.headers.get('x-verdict-secret');
+		if (human) {
+			if (!env.INTERNAL_SECRET || !env.HUMAN_SECRET || env.HUMAN_SECRET === env.INTERNAL_SECRET) {
+				return json({ error: 'server misconfigured: distinct human secret not set' }, 500);
+			}
+			if (secret !== env.HUMAN_SECRET) {
+				return json({ error: 'unauthorized: human x-verdict-secret required' }, 401);
+			}
+			return null;
+		}
 		if (!env.INTERNAL_SECRET) {
 			return json({ error: 'server misconfigured: write secret not set' }, 500);
 		}
@@ -30,17 +39,19 @@ export async function handleApi(req: Request, env: Env, url: URL, ctx?: Executio
 		}
 		return null;
 	};
-	const isWrite = method === 'POST' && (
-		path === '/api/intents' ||
-		/\/api\/intents\/[^/]+\/fork$/.test(path) ||
-		/\/api\/intents\/[^/]+\/submit$/.test(path) ||
+	const isHumanWrite = method === 'POST' && (
 		path === '/api/decide' ||
 		path === '/api/undo' ||
 		path === '/api/undo/confirm' ||
 		path === '/api/promotions/confirm'
 	);
+	const isWrite = isHumanWrite || (method === 'POST' && (
+		path === '/api/intents' ||
+		/\/api\/intents\/[^/]+\/fork$/.test(path) ||
+		/\/api\/intents\/[^/]+\/submit$/.test(path)
+	));
 	if (isWrite) {
-		const authErr = requireAuth();
+		const authErr = requireAuth(isHumanWrite);
 		if (authErr) return authErr;
 	}
 

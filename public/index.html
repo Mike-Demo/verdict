@@ -360,6 +360,7 @@
     last: { intents: "", cards: "", ledger: "" },
     apiOk: false
   };
+  var humanSecret = "";
 
   /* ---------- helpers ---------- */
   function esc(s) {
@@ -375,21 +376,27 @@
   }
   function api(path, opts) {
     opts = opts || {};
-    // V2: attach shared secret on write requests (stored in sessionStorage after first prompt)
+    // Agent writes and human approval actions use separate session credentials.
     if (opts.method === 'POST') {
       opts.headers = opts.headers || {};
-      var secret = sessionStorage.getItem('verdict_secret');
+      var humanAction = ['/api/decide', '/api/undo', '/api/undo/confirm', '/api/promotions/confirm'].indexOf(path) >= 0;
+      var secret = humanAction ? humanSecret : sessionStorage.getItem('verdict_secret');
       if (!secret) {
-        secret = prompt('Verdict write secret (ask Demo):');
-        if (secret) sessionStorage.setItem('verdict_secret', secret);
+        secret = prompt(humanAction ? 'Verdict human approval secret (ask Demo):' : 'Verdict agent write secret (ask Demo):');
+        if (secret) {
+          if (humanAction) humanSecret = secret;
+          else sessionStorage.setItem('verdict_secret', secret);
+        }
       }
       if (secret) opts.headers['x-verdict-secret'] = secret;
     }
     return fetch(path, opts).then(function (res) {
       return res.json().catch(function () { return {}; }).then(function (data) {
         if (res.status === 401) {
-          sessionStorage.removeItem('verdict_secret');
-          alert('Unauthorized: wrong or missing write secret.');
+          var humanAction = ['/api/decide', '/api/undo', '/api/undo/confirm', '/api/promotions/confirm'].indexOf(path) >= 0;
+          if (humanAction) humanSecret = '';
+          else sessionStorage.removeItem('verdict_secret');
+          alert('Unauthorized: wrong or missing ' + (humanAction ? 'human approval' : 'agent write') + ' secret.');
         }
         return { ok: res.ok, status: res.status, data: data };
       });
